@@ -11,8 +11,6 @@ import { MaterialKit, makeSignTexture } from '../core/materials'
 import { mulberry32 } from '../core/rng'
 import { roomShell, WorldRegistry, SectorId } from './registry'
 import type { Player } from '../core/player'
-import { fadeTeleport } from '../core/transitions'
-import { setState } from '../state'
 
 // Exhibit III — Scale Gallery. A dollhouse-sized reading room on a pedestal;
 // interact and the camera dives in, and the exact same room is real around
@@ -183,45 +181,9 @@ export function buildScaleGallery(
   // --- the full-size reading room, far away at z = −300
   buildReadingRoom(reg, mats, 'reading-room', READING_ROOM_ORIGIN, 1, { ceiling: true, recurse: true, collide: true })
 
-  // --- interactions
-  reg.addInteractable({
-    id: 'gallery-dive',
-    position: new Vector3(-20.5, 1.4, -4),
-    radius: 2.8,
-    prompt: 'E — step into the model',
-    enabled: () => true,
-    onInteract: () => {
-      setState({ inMiniatureRoom: true })
-      void fadeTeleport(scene, player, { pos: READING_ROOM_ENTRY.pos, yaw: READING_ROOM_ENTRY.yaw }, {
-        dollyToward: new Vector3(-20.5, 1.3, -4),
-      }).then(() => toast('Scale is a matter of opinion. You are now exhibit-sized.'))
-    },
-  })
-
-  reg.addInteractable({
-    id: 'rr-exit',
-    position: new Vector3(2.65, 1.5, -303.3),
-    radius: 2.6,
-    prompt: 'E — step back out',
-    enabled: () => true,
-    onInteract: () => {
-      setState({ inMiniatureRoom: false })
-      void fadeTeleport(scene, player, { pos: new Vector3(-18.5, 1.8, -4), yaw: -Math.PI / 2 })
-    },
-  })
-
-  reg.addInteractable({
-    id: 'rr-mini',
-    position: new Vector3(2.9, 1.4, -301.9),
-    radius: 2.4,
-    prompt: 'E — look closer',
-    enabled: () => true,
-    onInteract: () => {
-      void fadeTeleport(scene, player, { pos: READING_ROOM_ENTRY.pos, yaw: READING_ROOM_ENTRY.yaw }, {
-        dollyToward: new Vector3(2.9, 1.3, -301.9),
-      }).then(() => toast('You are already inside the model.'))
-    },
-  })
+  // (dive/exit interactions are driven by the director in BREACH)
+  void player
+  void toast
 
   // --- lights
   const galleryLight = new PointLight('gallery-light', new Vector3(-20.3, 3.5, -4), scene)

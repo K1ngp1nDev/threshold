@@ -8,29 +8,21 @@ import {
   Vector3,
 } from '@babylonjs/core'
 import { MaterialKit, PALETTE } from '../core/materials'
-import { TranslationGate } from '../core/portals'
 import type { Player } from '../core/player'
 import { WorldRegistry } from './registry'
-import { getState, setState } from '../state'
-import { playChime } from '../core/audio'
 
-// Exhibit II — Loop Corridor. A corridor of identical 14 m segments with two
-// silent translation gates: walk forward and you arrive where you started,
-// except the exhibits have changed. After 3 laps a storage door unlocks and a
-// service corridor leads back — through the same light-lock you entered.
+// Wing II — Loop Corridor. A corridor of identical segments; in BREACH the
+// "loop" reads through repeated geometry and enemies spawning behind you.
 
 const X_MIN = -7.1
 const X_MAX = -4.9
 const H = 3.2
-const SEG = 14
+const SEG = 14 // segment length
 const Z0 = 300 // corridor start
 const LOCK_ATRIUM_Z = 10 // atrium-side light-lock starts here
 const LOCK_CORRIDOR_Z = 296
-const GATE_OFFSET = 286 // z shift between the two light-locks
 
 export interface CorridorHandles {
-  gates: TranslationGate[]
-  applyLap: (lap: number) => void
   lights: PointLight[]
 }
 
@@ -148,29 +140,12 @@ export function buildLoopCorridor(
       sc.material = accentMat
     }
 
-    // plaque note
-    reg.addInteractable({
-      id: `cor-plaque-${i}`,
-      position: new Vector3(X_MIN + 0.1, 1.7, base + 7),
-      radius: 2.4,
-      prompt: 'E — read the plaque',
-      enabled: () => true,
-      onInteract: () => {
-        const lap = getState().laps
-        toast(
-          lap === 0
-            ? 'EXHIBIT II. A corridor of identical segments. Walk on.'
-            : lap < 3
-              ? `Lap ${lap}. Same corridor, different catalogue. Two silent 14 m jumps keep you inside.`
-              : 'The storage door is open. The way out is the way in.',
-        )
-      },
-    })
+    void toast
   }
 
-  // --- exit door + chamber + service corridor back
+  // --- exit door + chamber + service corridor back (sealed in BREACH)
   const doorMat = mats.brass
-  const exitDoor = reg.box('corridor', 'cor-exit-door', { w: 0.12, h: 2.55, d: 2.15 }, new Vector3(-4.72, 1.275, 321.5), doorMat)
+  reg.box('corridor', 'cor-exit-door', { w: 0.12, h: 2.55, d: 2.15 }, new Vector3(-4.72, 1.275, 321.5), doorMat)
   const lockedSign = MeshBuilder.CreatePlane('cor-exit-sign', { width: 1.1, height: 0.4 }, scene)
   lockedSign.position.set(-4.86, 2.15, 321.5)
   lockedSign.rotation.y = Math.PI / 2
@@ -198,113 +173,39 @@ export function buildLoopCorridor(
 
   // --- corridor lights
   const lights: PointLight[] = []
-  for (const z of [307, 321, 335]) {
+  for (const z of [304, 313, 322, 331, 340]) {
     const l = new PointLight(`cor-light-${z}`, new Vector3(-6, 2.9, z), scene)
     l.diffuse = PALETTE.warmLight.clone()
-    l.intensity = 0.85
-    l.range = 15
+    l.intensity = 1.15
+    l.range = 17
     lights.push(l)
   }
 
-  // --- lap logic
-  const applyLap = (lap: number): void => {
-    // plaque text
-    const ctx = plaqueTex.getContext() as CanvasRenderingContext2D
-    const w = 640
-    const h = 384
-    ctx.fillStyle = '#1a1815'
-    ctx.fillRect(0, 0, w, h)
-    ctx.strokeStyle = 'rgba(201,163,92,0.85)'
-    ctx.lineWidth = 4
-    ctx.strokeRect(10, 10, w - 20, h - 20)
-    ctx.textAlign = 'center'
-    const lines =
-      lap === 0
-        ? ['EXHIBIT II — LOOP CORRIDOR', 'object: brass sphere', 'status: catalogued']
-        : lap === 1
-          ? ['EXHIBIT II — LOOP CORRIDOR', 'object: cube (was it a sphere?)', 'status: re-catalogued']
-          : lap === 2
-            ? ['THE CORRIDOR REMEMBERS', `you have walked ${28 + (lap - 1) * 14} metres`, 'and arrived where you began']
-            : ['STORAGE DOOR — UNLOCKED', 'the way out is the way in', `laps: ${lap}`]
-    ctx.fillStyle = '#f4efe7'
-    ctx.font = '600 40px ui-sans-serif, system-ui, sans-serif'
-    ctx.fillText(lines[0], w / 2, 120, w - 60)
-    ctx.fillStyle = 'rgba(244,239,231,0.72)'
-    ctx.font = '400 30px ui-sans-serif, system-ui, sans-serif'
-    ctx.fillText(lines[1], w / 2, 210, w - 60)
-    ctx.fillText(lines[2], w / 2, 280, w - 60)
-    plaqueTex.update()
+  // static catalogue dressing (the "loop" now reads through repeated segments
+  // and enemies spawning behind you, not player teleport gates)
+  const ctx = plaqueTex.getContext() as CanvasRenderingContext2D
+  const w = 640
+  const h = 384
+  ctx.fillStyle = '#1a1815'
+  ctx.fillRect(0, 0, w, h)
+  ctx.strokeStyle = 'rgba(201,163,92,0.85)'
+  ctx.lineWidth = 4
+  ctx.strokeRect(10, 10, w - 20, h - 20)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#f4efe7'
+  ctx.font = '600 40px ui-sans-serif, system-ui, sans-serif'
+  ctx.fillText('WING II — LOOP CORRIDOR', w / 2, 130, w - 60)
+  ctx.fillStyle = 'rgba(244,239,231,0.72)'
+  ctx.font = '400 30px ui-sans-serif, system-ui, sans-serif'
+  ctx.fillText('the corridor folds back', w / 2, 215, w - 60)
+  ctx.fillText('watch behind you', w / 2, 270, w - 60)
+  plaqueTex.update()
 
-    // artifacts
-    const type = lap >= 3 ? -1 : lap % 3
-    artifacts.forEach((set, i) => {
-      set.forEach((m, j) => m.setEnabled(j === type))
-      cardSigns[i].setEnabled(type === -1)
-    })
+  artifacts.forEach((set, i) => {
+    set.forEach((m, j) => m.setEnabled(j === 0))
+    cardSigns[i].setEnabled(false)
+  })
+  accentMat.emissiveColor = PALETTE.warmLight.clone()
 
-    // accent hue drifts from warm to teal as the loop tightens
-    const k = Math.min(lap / 4, 1)
-    const c = Color3.Lerp(PALETTE.warmLight, PALETTE.teal, k)
-    accentMat.emissiveColor = c
-    for (const l of lights) l.diffuse = Color3.Lerp(PALETTE.warmLight, PALETTE.teal, k * 0.6)
-
-    // exit unlocks after 3 laps
-    const unlocked = lap >= 3
-    exitDoor.setEnabled(!unlocked)
-    if (unlocked && !getState().corridorUnlocked) {
-      setState({ corridorUnlocked: true })
-      toast('Somewhere behind you, a lock clicks. The storage door is open.')
-    }
-  }
-  applyLap(0)
-
-  // --- gates
-  const gates: TranslationGate[] = [
-    // atrium light-lock → corridor light-lock
-    new TranslationGate(player, {
-      point: new Vector3(-6, 0, LOCK_ATRIUM_Z + 2.35),
-      axis: 'z',
-      direction: 1,
-      span: { min: new Vector3(-7.2, 0, LOCK_ATRIUM_Z + 1), max: new Vector3(-4.8, 3, LOCK_ATRIUM_Z + 3.6) },
-      offset: new Vector3(0, 0, GATE_OFFSET),
-    }),
-    // corridor light-lock → atrium light-lock
-    new TranslationGate(player, {
-      point: new Vector3(-6, 0, LOCK_CORRIDOR_Z + 2.1),
-      axis: 'z',
-      direction: -1,
-      span: { min: new Vector3(-7.2, 0, LOCK_CORRIDOR_Z + 0.6), max: new Vector3(-4.8, 3, LOCK_CORRIDOR_Z + 3.4) },
-      offset: new Vector3(0, 0, -GATE_OFFSET),
-    }),
-    // the loop itself — walk north, get moved one segment back
-    new TranslationGate(player, {
-      point: new Vector3(-6, 0, 331),
-      axis: 'z',
-      direction: 1,
-      span: { min: new Vector3(-7.2, 0, 325), max: new Vector3(-4.8, 3.2, 338) },
-      offset: new Vector3(0, 0, -SEG),
-      onCross: () => {
-        const lap = getState().laps + 1
-        setState({ laps: lap })
-        applyLap(lap)
-        playChime()
-        if (lap === 1) toast('You are back where you started. Almost.')
-      },
-    }),
-    // walking backwards unwinds the loop
-    new TranslationGate(player, {
-      point: new Vector3(-6, 0, 311),
-      axis: 'z',
-      direction: -1,
-      span: { min: new Vector3(-7.2, 0, 304), max: new Vector3(-4.8, 3.2, 317) },
-      offset: new Vector3(0, 0, SEG),
-      onCross: () => {
-        const lap = Math.max(0, getState().laps - 1)
-        setState({ laps: lap })
-        applyLap(lap)
-      },
-    }),
-  ]
-
-  return { gates, applyLap, lights }
+  return { lights }
 }

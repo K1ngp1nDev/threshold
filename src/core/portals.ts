@@ -70,6 +70,8 @@ class PortalSide {
   private prevDist = Infinity
   private active = false
   private t = 0
+  private glowBase: number
+  private pulseT = 0
 
   constructor(
     private scene: Scene,
@@ -80,7 +82,9 @@ class PortalSide {
     portalRatio: number,
     private onCross: () => void,
     glowAmp: number,
+    private allowCross: boolean,
   ) {
+    this.glowBase = glowAmp
     const name = `portal-${from.position.x}-${from.position.z}`
     this.mat = new ShaderMaterial(name, scene, { vertex: 'portal', fragment: 'portal' }, {
       attributes: ['position', 'uv'],
@@ -128,6 +132,34 @@ class PortalSide {
     return this.to.yaw + Math.PI - this.from.yaw
   }
 
+  addRenderMesh(m: Mesh): void {
+    if (!this.rtt.renderList) this.rtt.renderList = []
+    if (!this.rtt.renderList.includes(m)) this.rtt.renderList.push(m)
+  }
+
+  pulse(): void {
+    this.pulseT = 1
+  }
+
+  /** Remap a ray that enters this portal's opening into the counterpart frame. */
+  remap(origin: Vector3, dir: Vector3): { origin: Vector3; dir: Vector3; entryDist: number; entryPoint: Vector3 } | null {
+    const n = dirOf(this.from.yaw)
+    const denom = Vector3.Dot(dir, n)
+    if (denom >= -1e-4) return null // must be moving INTO the front face
+    const t = Vector3.Dot(this.from.position.subtract(origin), n) / denom
+    if (t <= 0) return null
+    const entry = origin.add(dir.scale(t))
+    const rel = entry.subtract(this.from.position)
+    const lateral = Math.abs(rel.x * n.z - rel.z * n.x)
+    if (lateral > this.from.width / 2) return null
+    if (rel.y < 0 || rel.y > this.from.height) return null
+    const delta = this.yawDelta
+    const cos = Math.cos(delta)
+    const sin = Math.sin(delta)
+    const md = new Vector3(dir.x * cos + dir.z * sin, dir.y, -dir.x * sin + dir.z * cos).normalize()
+    return { origin: this.map(entry), dir: md, entryDist: t, entryPoint: entry }
+  }
+
   setActive(on: boolean): void {
     if (on === this.active) return
     this.active = on
@@ -152,8 +184,10 @@ class PortalSide {
     }
 
     this.t += engine.getDeltaTime() / 1000
+    if (this.pulseT > 0) this.pulseT = Math.max(0, this.pulseT - (engine.getDeltaTime() / 1000) * 1.4)
     this.mat.setVector2('resolution', new Vector2(engine.getRenderWidth(), engine.getRenderHeight()))
     this.mat.setFloat('time', reducedMotion ? 0 : this.t)
+    this.mat.setFloat('glowAmp', this.glowBase + this.pulseT * 0.5)
 
     // virtual camera mirrors the player through the mapping
     const vp = this.map(p)
@@ -169,7 +203,7 @@ class PortalSide {
     const d = Vector3.Dot(rel, n)
     const lateral = Math.abs(rel.x * n.z - rel.z * n.x) // perpendicular offset in plane
     const withinOpening = lateral < this.from.width / 2 + 0.15 && rel.y > -0.5 && rel.y < this.from.height + 0.5
-    if (this.prevDist > 0 && d <= 0 && this.prevDist < 1.6 && withinOpening) {
+    if (this.allowCross && this.prevDist > 0 && d <= 0 && this.prevDist < 1.6 && withinOpening) {
       const mapped = this.map(p)
       const delta = this.yawDelta
       // rotate residual velocity so momentum carries through
@@ -196,6 +230,7 @@ export interface PortalPairOptions {
   seenFromB: Mesh[]
   portalRatio: number
   glowAmp?: number
+  allowCross?: boolean
   onCross?: (toSide: 'a' | 'b') => void
 }
 
@@ -205,13 +240,28 @@ export class PortalPair {
 
   constructor(scene: Scene, player: Player, opts: PortalPairOptions) {
     const glow = opts.glowAmp ?? 0.35
-    this.sideA = new PortalSide(scene, player, opts.a, opts.b, opts.seenFromA, opts.portalRatio, () => opts.onCross?.('b'), glow)
-    this.sideB = new PortalSide(scene, player, opts.b, opts.a, opts.seenFromB, opts.portalRatio, () => opts.onCross?.('a'), glow)
+    const cross = opts.allowCross ?? true
+    this.sideA = new PortalSide(scene, player, opts.a, opts.b, opts.seenFromA, opts.portalRatio, () => opts.onCross?.('b'), glow, cross)
+    this.sideB = new PortalSide(scene, player, opts.b, opts.a, opts.seenFromB, opts.portalRatio, () => opts.onCross?.('a'), glow, cross)
   }
 
   update(engine: Engine, reducedMotion: boolean): void {
     this.sideA.update(engine, reducedMotion)
     this.sideB.update(engine, reducedMotion)
+  }
+
+  /** Ray remap using the viewer-facing (A) side — for shooting through the door. */
+  remapPrimary(origin: Vector3, dir: Vector3): { origin: Vector3; dir: Vector3; entryDist: number; entryPoint: Vector3 } | null {
+    return this.sideA.remap(origin, dir)
+  }
+
+  addRenderMesh(m: Mesh): void {
+    this.sideA.addRenderMesh(m)
+  }
+
+  pulse(): void {
+    this.sideA.pulse()
+    this.sideB.pulse()
   }
 }
 

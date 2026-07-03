@@ -1,64 +1,81 @@
-// Captures the documentation screenshots into docs/screenshots/.
-// Run `npm run build` first; this serves the production build via vite preview.
+// Captures the 7 documentation screenshots for THRESHOLD: BREACH.
+// Run `npm run build` first.
 import { mkdirSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { preview } from 'vite'
 
 const OUT = 'docs/screenshots'
 mkdirSync(OUT, { recursive: true })
-
 const server = await preview({ preview: { port: 4177, strictPort: true } })
 const browser = await chromium.launch()
 
-async function readyPage(context, url) {
+async function ready(context, url) {
   const page = await context.newPage()
+  page.on('pageerror', (e) => console.log('pageerror:', e.message))
   await page.goto(url, { waitUntil: 'load' })
-  await page.waitForFunction(() => window.__THRESHOLD__?.ready === true, { timeout: 30000 })
-  await page.waitForTimeout(900)
+  await page.waitForFunction(() => window.__BREACH__?.ready === true, { timeout: 30000 })
+  await page.waitForTimeout(800)
   return page
 }
+const call = (page, fn, ...a) => page.evaluate(({ fn, a }) => window.__BREACH__[fn](...a), { fn, a })
 
-// --- desktop shots (3200×2000 actual pixels)
-const desktop = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
-const page = await readyPage(desktop, 'http://localhost:4177/?qa=1&quality=high')
+// --- title screen (no qa so it stays on the title)
+{
+  const c = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
+  const p = await ready(c, 'http://localhost:4177/?quality=high')
+  await p.waitForTimeout(400)
+  await p.screenshot({ path: `${OUT}/threshold-breach-start.png` })
+  console.log('shot threshold-breach-start')
+  await c.close()
+}
 
-const shots = [
-  ['threshold-entrance', 'entrance'],
-  ['impossible-door', 'impossible-door'],
-  ['loop-corridor', 'loop-corridor'],
-  ['scale-gallery', 'scale-gallery'],
-  ['mirror-atrium', 'mirror-atrium'],
+// --- desktop combat shots
+const desk = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
+const page = await ready(desk, 'http://localhost:4177/?qa=1&quality=high')
+await call(page, 'invuln', true)
+await call(page, 'giveWeapon')
+await page.waitForTimeout(900)
+
+// combat-entrance
+await call(page, 'shoot')
+await page.waitForTimeout(25)
+await page.screenshot({ path: `${OUT}/combat-entrance.png` })
+console.log('shot combat-entrance')
+
+// weapon-and-portal (aim at the Impossible Door)
+await call(page, 'look', 1.5, 0)
+await page.waitForTimeout(300)
+await call(page, 'shoot')
+await page.waitForTimeout(25)
+await page.screenshot({ path: `${OUT}/weapon-and-portal.png` })
+console.log('shot weapon-and-portal')
+
+const zones = [
+  ['loop-corridor-fight', 1, ['echo', 'shard']],
+  ['scale-gallery-arena', 2, ['warden', 'echo']],
+  ['mirror-atrium-final', 3, ['echo', 'shard']],
 ]
-for (const [file, pose] of shots) {
-  await page.evaluate((id) => window.__THRESHOLD__.teleport(id), pose)
+for (const [file, z, types] of zones) {
+  await call(page, 'enterZone', z)
   await page.waitForTimeout(1100)
+  for (const t of types) await call(page, 'spawnEnemy', t)
+  await page.waitForTimeout(700)
+  await call(page, 'shoot')
+  await page.waitForTimeout(25)
   await page.screenshot({ path: `${OUT}/${file}.png` })
   console.log('shot', file)
 }
-await desktop.close()
+await desk.close()
 
-// --- mobile (cinematic tour mode)
-const mobile = await browser.newContext({
-  viewport: { width: 390, height: 844 },
-  deviceScaleFactor: 2,
-  hasTouch: true,
-  isMobile: true,
-})
-const mp = await readyPage(mobile, 'http://localhost:4177/?qa=1&quality=low&touch=1')
-await mp.evaluate(() => window.__THRESHOLD__.teleport('entrance'))
-await mp.waitForTimeout(1100)
+// --- mobile (touch controls visible)
+const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })
+const mp = await ready(mob, 'http://localhost:4177/?qa=1&quality=low&touch=1')
+await call(mp, 'invuln', true)
+await call(mp, 'giveWeapon')
+await mp.waitForTimeout(900)
 await mp.screenshot({ path: `${OUT}/mobile.png` })
 console.log('shot mobile')
-await mobile.close()
-
-// --- reduced motion (badge visible in the HUD)
-const reduced = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
-const rp = await readyPage(reduced, 'http://localhost:4177/?qa=1&quality=high')
-await rp.evaluate(() => window.__THRESHOLD__.teleport('atrium'))
-await rp.waitForTimeout(1100)
-await rp.screenshot({ path: `${OUT}/reduced-motion.png` })
-console.log('shot reduced-motion')
-await reduced.close()
+await mob.close()
 
 await browser.close()
 await server.close()

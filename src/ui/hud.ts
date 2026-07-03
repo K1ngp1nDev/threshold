@@ -1,36 +1,29 @@
-import { getState, setState, subscribe, ZONE_LABELS, ZoneId } from '../state'
+import { getState, setState, subscribe } from '../state'
 import { setFadeElement } from '../core/transitions'
-import { toggleMute, unlockAudio } from '../core/audio'
+import { unlockAudio, toggleMute } from '../core/audio'
 
 export interface HudDeps {
   isTouch: boolean
   qaMode: boolean
-  viewpoints: { id: string; label: string }[]
-  onEnter: () => void
+  onStart: () => void
+  onRestart: () => void
   onInteract: () => void
-  onViewpoint: (id: string) => void
-  getPlayerPos: () => { x: number; y: number; z: number }
+  onLook: (dx: number, dy: number) => void
+  onMove: (fwd: number, side: number) => void
+  onJump: () => void
+  onCrouch: (on: boolean) => void
+  onFire: (down: boolean) => void
+  onPulseDown: () => void
+  onPulseUp: () => void
 }
 
 export interface Hud {
   toast: (text: string, ms?: number) => void
+  banner: (title: string, sub: string) => void
+  hitMarker: (kind: 'hit' | 'kill' | 'shielded') => void
   setPrompt: (text: string | null) => void
   setFps: (fps: number) => void
-  openHelp: () => void
-  isModalOpen: () => boolean
-}
-
-const ZONE_TRICKS: Record<ZoneId, string> = {
-  atrium:
-    'Four exhibits, one scene. Sectors of geometry live hundreds of metres apart; portals and silent gates stitch them into a single building.',
-  'impossible-door':
-    'A second camera mirrors your pose through the door mapping and renders Room 402 to a texture, sampled in screen space. Crossing the plane relocates you 232 m east — the frame never cuts.',
-  'loop-corridor':
-    'Two invisible planes shift you ±14 m between identical segments. You never see the join; the catalogue changes while your back is turned.',
-  'scale-gallery':
-    'The dollhouse and the room are the same builder function at scale 0.09 and 1.0. “Entering” is a camera dolly plus a 300 m teleport.',
-  'mirror-atrium':
-    'There is no mirror. The room behind the glass is built by hand, reflected across x = 2, then edited. The orb maps your position through the plane.',
+  isBusy: () => boolean // title / paused / result — game input suspended
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string): HTMLElementTagNameMap[K] {
@@ -40,270 +33,384 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
   return e
 }
 
+function fmtTime(s: number): string {
+  const m = Math.floor(s / 60)
+  const sec = Math.floor(s % 60)
+  return `${m}:${sec.toString().padStart(2, '0')}`
+}
+
 export function createHud(deps: HudDeps): Hud {
   const root = document.getElementById('ui')!
   const s = getState()
 
-  // fade layer for transitions
   const fade = el('div')
   fade.id = 'fade'
   root.appendChild(fade)
   setFadeElement(fade)
 
-  // top-left: zone + status
-  const topLeft = el('div', 'hud-panel hud-topleft')
-  const zoneEl = el('div', 'hud-zone', ZONE_LABELS[s.zone])
-  const statusEl = el('div', 'hud-status')
-  const fpsEl = el('span', undefined, '— fps')
-  const qEl = el('span', undefined, `quality: ${s.quality}`)
-  const badges = el('span', 'hud-badge', '')
-  statusEl.append(fpsEl, qEl, badges)
-  topLeft.append(zoneEl, statusEl)
-  root.appendChild(topLeft)
+  // ---- combat HUD (hidden until playing)
+  const hud = el('div', 'combat-hud')
 
-  // hint
+  // crosshair + charge ring + hit marker
+  const cross = el('div', 'crosshair')
+  cross.innerHTML = `
+    <svg viewBox="0 0 80 80" width="80" height="80">
+      <circle class="charge-track" cx="40" cy="40" r="30"></circle>
+      <circle class="charge-fill" cx="40" cy="40" r="30"></circle>
+    </svg>
+    <span class="tick t-up"></span><span class="tick t-dn"></span>
+    <span class="tick t-l"></span><span class="tick t-r"></span>
+    <span class="dot"></span>
+    <span class="hitmark"></span>`
+  hud.appendChild(cross)
+  const chargeFill = cross.querySelector('.charge-fill') as SVGCircleElement
+  const hitmark = cross.querySelector('.hitmark') as HTMLElement
+  const CIRC = 2 * Math.PI * 30
+  chargeFill.style.strokeDasharray = String(CIRC)
+
+  // top objective bar
+  const top = el('div', 'hud-panel obj-bar')
+  const zoneEl = el('div', 'obj-zone', 'Entrance Hall')
+  const objEl = el('div', 'obj-text', 'Recover the Prism Carbine')
+  const pips = el('div', 'obj-pips')
+  top.append(zoneEl, objEl, pips)
+  hud.appendChild(top)
+
+  // top-right status
+  const status = el('div', 'hud-status2')
+  status.innerHTML = `<span class="st-time">0:00</span> · <span class="st-kills">0 sealed</span> · <span class="st-fps">—</span>`
+  hud.appendChild(status)
+  const stTime = status.querySelector('.st-time') as HTMLElement
+  const stKills = status.querySelector('.st-kills') as HTMLElement
+  const stFps = status.querySelector('.st-fps') as HTMLElement
+
+  // vitals (bottom-left)
+  const vitals = el('div', 'vitals')
+  vitals.innerHTML = `
+    <div class="bar bar-shield"><span class="fill"></span><label>SHIELD</label></div>
+    <div class="bar bar-health"><span class="fill"></span><label>INTEGRITY</label></div>`
+  hud.appendChild(vitals)
+  const shieldFill = vitals.querySelector('.bar-shield .fill') as HTMLElement
+  const healthFill = vitals.querySelector('.bar-health .fill') as HTMLElement
+
+  // heat (bottom-right)
+  const heatWrap = el('div', 'heat')
+  heatWrap.innerHTML = `<div class="heat-bar"><span class="heat-fill"></span></div><div class="heat-label">PRISM CARBINE</div>`
+  hud.appendChild(heatWrap)
+  const heatFill = heatWrap.querySelector('.heat-fill') as HTMLElement
+  const heatLabel = heatWrap.querySelector('.heat-label') as HTMLElement
+
+  // interaction hint
   const hint = el('div', 'hud-panel hud-hint')
-  root.appendChild(hint)
+  hud.appendChild(hint)
 
-  // resume chip
-  const resume = el('div', 'hud-panel resume-chip', '<b>Click</b> to resume walking')
-  root.appendChild(resume)
+  // banner
+  const banner = el('div', 'banner')
+  banner.innerHTML = `<div class="banner-title"></div><div class="banner-sub"></div>`
+  hud.appendChild(banner)
+  const bannerTitle = banner.querySelector('.banner-title') as HTMLElement
+  const bannerSub = banner.querySelector('.banner-sub') as HTMLElement
 
   // toasts
   const toasts = el('div', 'hud-toasts')
-  root.appendChild(toasts)
+  hud.appendChild(toasts)
 
-  // actions
+  // damage vignette
+  const vignette = el('div', 'damage-vignette')
+  hud.appendChild(vignette)
+
+  root.appendChild(hud)
+
+  // top-right buttons (sound/help/pause)
   const actions = el('div', 'hud-actions')
-  const helpBtn = el('button', 'hud-btn', '?')
-  helpBtn.title = 'Help (H)'
   const soundBtn = el('button', 'hud-btn', '♪')
-  soundBtn.title = 'Sound (M)'
-  const xrayBtn = el('button', 'hud-btn', '✕')
-  xrayBtn.title = 'X-ray (X)'
-  xrayBtn.textContent = '⌗'
-  actions.append(xrayBtn, soundBtn, helpBtn)
-  root.appendChild(actions)
+  const pauseBtn = el('button', 'hud-btn', '⏸')
+  actions.append(soundBtn, pauseBtn)
+  hud.appendChild(actions)
 
-  // x-ray panel
-  const xray = el('div', 'hud-panel xray-panel')
-  xray.innerHTML = `
-    <h4>X-ray — how this zone works</h4>
-    <svg viewBox="0 0 300 240" aria-label="museum sector map">
-      <g fill="none" stroke="rgba(201,163,92,0.55)" stroke-width="1.5">
-        <rect x="55.6" y="19" width="114" height="76"></rect>
-        <rect x="74.2" y="59.2" width="16" height="13.7" fill="rgba(201,163,92,0.18)"></rect>
-        <rect x="16.2" y="65.5" width="38" height="30.4"></rect>
-        <rect x="59.4" y="95" width="12" height="15.2" ></rect>
-        <rect x="59.4" y="110" width="61" height="45.6"></rect>
-        <rect x="120.4" y="110" width="61" height="45.6" stroke-dasharray="4 3" stroke="rgba(90,163,154,0.6)"></rect>
-      </g>
-      <g fill="none" stroke="rgba(90,163,154,0.5)" stroke-width="1.5">
-        <rect x="200" y="20" width="80" height="70"></rect>
-        <rect x="204" y="110" width="18" height="95"></rect>
-        <rect x="235" y="140" width="50" height="45"></rect>
-      </g>
-      <g stroke="rgba(244,239,231,0.3)" stroke-width="1" stroke-dasharray="3 4">
-        <line x1="90" y1="66" x2="200" y2="55"></line>
-        <line x1="65" y1="103" x2="204" y2="120"></line>
-        <line x1="35" y1="96" x2="235" y2="162"></line>
-      </g>
-      <g class="xray-map-label">
-        <text x="60" y="16">ATRIUM</text>
-        <text x="16" y="62">GALLERY</text>
-        <text x="60" y="166">MIRROR</text>
-        <text x="122" y="166" fill="rgba(90,163,154,0.7)">TWIN (built)</text>
-        <text x="200" y="16" fill="rgba(90,163,154,0.8)">ROOM 402 · +250 m E</text>
-        <text x="196" y="104" fill="rgba(90,163,154,0.8)" transform="rotate(0)">LOOP · +290 m N</text>
-        <text x="228" y="136" fill="rgba(90,163,154,0.8)">READING · −300 m S</text>
-      </g>
-      <circle id="xray-dot" cx="70" cy="60" r="3.4" fill="#ffb347"></circle>
-    </svg>
-    <div class="xray-note" id="xray-note"></div>`
-  root.appendChild(xray)
-  const xrayDot = xray.querySelector('#xray-dot') as SVGCircleElement
-  const xrayNote = xray.querySelector('#xray-note') as HTMLElement
-
-  // map world → svg for the player dot
-  const dotPos = (p: { x: number; z: number }): { cx: number; cy: number } => {
-    const near = (wx: number, wz: number) => ({ cx: 10 + (wx + 27) * 3.8, cy: 10 + (15 - wz) * 3.8 })
-    if (p.x > 230 && p.x < 270) {
-      return { cx: 200 + ((p.x - 237) / 26) * 80, cy: 90 - ((p.z + 18) / 36) * 70 }
-    }
-    if (p.z > 290) {
-      return { cx: 213, cy: 205 - ((p.z - 296) / 48) * 95 }
-    }
-    if (p.z < -290) {
-      return { cx: 235 + ((p.x + 4.5) / 9) * 50, cy: 185 - ((p.z + 303.5) / 7) * 45 }
-    }
-    return near(p.x, p.z)
+  // ---- touch controls
+  let touchLook: HTMLElement | null = null
+  if (deps.isTouch) {
+    const tc = el('div', 'touch-controls')
+    tc.innerHTML = `
+      <div class="look-zone"></div>
+      <div class="joystick"><span class="stick"></span></div>
+      <button class="tbtn fire">FIRE</button>
+      <button class="tbtn pulse">PULSE</button>
+      <button class="tbtn jump">JUMP</button>
+      <button class="tbtn crouch">DUCK</button>`
+    hud.appendChild(tc)
+    touchLook = tc.querySelector('.look-zone') as HTMLElement
+    setupTouch(tc, touchLook, deps)
   }
-  window.setInterval(() => {
-    if (!getState().xray) return
-    const p = deps.getPlayerPos()
-    const { cx, cy } = dotPos(p)
-    xrayDot.setAttribute('cx', String(Math.max(4, Math.min(296, cx))))
-    xrayDot.setAttribute('cy', String(Math.max(4, Math.min(236, cy))))
-  }, 130)
 
-  // tour bar (touch / cinematic mode)
-  const tour = el('div', 'hud-panel tour-bar')
-  const prevBtn = el('button', 'tour-btn', '◀')
-  const tourLabel = el('div', 'tour-label', deps.viewpoints[0]?.label ?? '')
-  const nextBtn = el('button', 'tour-btn', '▶')
-  const interactBtn = el('button', 'tour-interact', '◉')
-  tour.append(prevBtn, tourLabel, nextBtn, interactBtn)
-  root.appendChild(tour)
-  let vpIndex = 0
-  const goViewpoint = (di: number) => {
-    vpIndex = (vpIndex + di + deps.viewpoints.length) % deps.viewpoints.length
-    tourLabel.textContent = deps.viewpoints[vpIndex].label
-    deps.onViewpoint(deps.viewpoints[vpIndex].id)
-  }
-  prevBtn.addEventListener('click', () => goViewpoint(-1))
-  nextBtn.addEventListener('click', () => goViewpoint(1))
-  interactBtn.addEventListener('click', () => deps.onInteract())
-  if (deps.isTouch) tour.classList.add('show')
+  // ---- overlays: title / pause / result
+  const overlay = el('div', 'overlay')
+  root.appendChild(overlay)
 
-  // help modal
-  const modalWrap = el('div', 'modal-wrap')
-  const kbd = (k: string, what: string) => `<span><kbd>${k}</kbd> ${what}</span>`
-  modalWrap.innerHTML = `
-    <div class="hud-panel modal">
-      <h2>Threshold Institute <button class="modal-close" aria-label="close">×</button></h2>
-      <p>A walkable museum of impossible spaces. Everything is procedural — no downloaded assets, no backend. The building cannot exist; the geometry insists otherwise.</p>
-      <h3>Controls</h3>
-      <div class="kbd-row">
-        ${kbd('W A S D', 'walk')}${kbd('Shift', 'brisk pace')}${kbd('Mouse', 'look')}${kbd('E', 'interact')}${kbd('X', 'x-ray')}${kbd('M', 'sound')}${kbd('H', 'help')}${kbd('Esc', 'release cursor')}
-      </div>
-      <p style="margin-top:10px">On touch devices: drag to look, ◀ ▶ to move between rooms, ◉ to interact.</p>
-      <h3>The exhibits — and how they work</h3>
-      <ul>
-        <li><b>I — Impossible Door.</b> ${ZONE_TRICKS['impossible-door']}</li>
-        <li><b>II — Loop Corridor.</b> ${ZONE_TRICKS['loop-corridor']}</li>
-        <li><b>III — Scale Gallery.</b> ${ZONE_TRICKS['scale-gallery']}</li>
-        <li><b>IV — Mirror Atrium.</b> ${ZONE_TRICKS['mirror-atrium']}</li>
-      </ul>
-      <h3>Quality</h3>
-      <p>
-        <a href="?quality=low">low</a> · <a href="?quality=medium">medium</a> · <a href="?quality=high">high</a>
-        — current: <b>${s.quality}</b>. Reduced motion: <b>${s.reducedMotion ? 'on' : 'off'}</b> (system setting).
-      </p>
-      <h3>Colophon</h3>
-      <p>Babylon.js · TypeScript · Vite. Procedural textures, portal render-targets, translation gates. Part of the k1ngp1n.com demo collection.</p>
-    </div>`
-  root.appendChild(modalWrap)
-  const closeModal = () => {
-    modalWrap.classList.remove('open')
-    modalOpen = false
-  }
-  let modalOpen = false
-  const openHelp = () => {
-    modalWrap.classList.add('open')
-    modalOpen = true
-    document.exitPointerLock?.()
-  }
-  modalWrap.querySelector('.modal-close')!.addEventListener('click', closeModal)
-  modalWrap.addEventListener('click', (e) => {
-    if (e.target === modalWrap) closeModal()
-  })
-
-  // onboarding
-  let entered = deps.qaMode
-  if (!deps.qaMode) {
-    const onboard = el('div', 'onboard')
-    const card = el('div', 'hud-panel onboard-card')
-    card.innerHTML = `
-      <div class="onboard-kicker">Threshold Institute</div>
-      <div class="onboard-title">THRESHOLD</div>
-      <div class="onboard-sub">A museum of impossible spaces.<br/>Four exhibits. One rule: trust the door, not the floor plan.</div>`
-    const enter = el('button', 'onboard-enter', deps.isTouch ? 'Tap to enter' : 'Click to enter')
-    card.appendChild(enter)
-    onboard.appendChild(card)
-    root.appendChild(onboard)
-    enter.addEventListener('click', () => {
-      onboard.remove()
-      entered = true
+  const renderTitle = () => {
+    overlay.className = 'overlay open'
+    overlay.innerHTML = `
+      <div class="hud-panel screen title-screen">
+        <div class="screen-kicker">Threshold Institute · Anomaly Response</div>
+        <h1 class="screen-title">THRESHOLD<span>: BREACH</span></h1>
+        <p class="screen-sub">Space is failing across four wings. Seal the breach anchors and get out.
+        A first-person anomaly shooter where the architecture is the enemy.</p>
+        <button class="big-btn" data-act="start">${deps.isTouch ? 'Tap to breach' : 'Click to breach'}</button>
+        <div class="screen-controls">${controlsHtml(deps.isTouch)}</div>
+      </div>`
+    overlay.querySelector('[data-act="start"]')!.addEventListener('click', () => {
       unlockAudio()
-      deps.onEnter()
-      runTips()
+      deps.onStart()
     })
   }
 
-  // three short tips, sequential
-  const runTips = () => {
-    const tips = deps.isTouch
-      ? ['<b>Drag</b> — look around', '<b>◀ ▶</b> — move between rooms', '<b>◉</b> — interact']
-      : ['<b>W A S D</b> — walk · <b>Shift</b> — brisk', '<b>Mouse</b> — look around', '<b>E</b> — inspect the exhibits']
-    let i = 0
-    const showNext = () => {
-      if (i >= tips.length) return
-      const tip = el('div', 'hud-panel tip', tips[i])
-      root.appendChild(tip)
-      i++
-      setTimeout(() => {
-        tip.remove()
-        showNext()
-      }, 2600)
-    }
-    showNext()
+  const renderPaused = () => {
+    overlay.className = 'overlay open'
+    overlay.innerHTML = `
+      <div class="hud-panel screen">
+        <h2 class="screen-h2">Paused</h2>
+        <div class="screen-controls">${controlsHtml(deps.isTouch)}</div>
+        <div class="screen-btns">
+          <button class="big-btn" data-act="resume">Resume</button>
+          <button class="ghost-btn" data-act="restart">Restart run</button>
+        </div>
+      </div>`
+    overlay.querySelector('[data-act="resume"]')!.addEventListener('click', resume)
+    overlay.querySelector('[data-act="restart"]')!.addEventListener('click', () => deps.onRestart())
   }
 
-  // wire buttons + keys
-  helpBtn.addEventListener('click', openHelp)
+  const renderResult = (win: boolean) => {
+    const st = getState()
+    overlay.className = 'overlay open'
+    overlay.innerHTML = `
+      <div class="hud-panel screen result ${win ? 'win' : 'lose'}">
+        <div class="screen-kicker">${win ? 'Breach sealed' : 'Operator down'}</div>
+        <h1 class="screen-title">${win ? 'CONTAINMENT' : 'LOST TO THE'}<span>${win ? ' RESTORED' : ' ANOMALY'}</span></h1>
+        <div class="result-stats">
+          <div><b>${fmtTime(st.elapsed)}</b><span>time</span></div>
+          <div><b>${st.kills}</b><span>anomalies purged</span></div>
+          <div><b>${st.anchorsSealedTotal}</b><span>anchors sealed</span></div>
+          <div><b>${st.zoneIndex + 1}/${st.zoneCount}</b><span>wings reached</span></div>
+        </div>
+        <button class="big-btn" data-act="restart">${win ? 'Run it again' : 'Try again'}</button>
+      </div>`
+    overlay.querySelector('[data-act="restart"]')!.addEventListener('click', () => deps.onRestart())
+  }
+
+  const hideOverlay = () => {
+    overlay.className = 'overlay'
+    overlay.innerHTML = ''
+  }
+
+  const resume = () => {
+    setState({ phase: 'playing' })
+    if (!deps.isTouch && !deps.qaMode) {
+      const c = document.getElementById('c') as HTMLCanvasElement
+      c.requestPointerLock?.()
+    }
+  }
+
+  // ---- reactive state -> DOM
+  let lastHealth = s.health
+  subscribe((st) => {
+    zoneEl.textContent = `Wing ${st.zoneIndex + 1} — ${st.zoneLabel}`
+    objEl.textContent = st.objective
+    // anchor pips
+    if (pips.childElementCount !== st.anchorsTotal) {
+      pips.innerHTML = ''
+      for (let i = 0; i < st.anchorsTotal; i++) pips.appendChild(el('span', 'pip'))
+    }
+    Array.from(pips.children).forEach((c, i) => c.classList.toggle('on', i < st.anchorsSealed))
+
+    shieldFill.style.width = `${(st.shield / st.maxShield) * 100}%`
+    healthFill.style.width = `${(st.health / st.maxHealth) * 100}%`
+    healthFill.classList.toggle('low', st.health <= 30)
+
+    heatFill.style.width = `${st.heat}%`
+    heatFill.classList.toggle('hot', st.heat > 70)
+    heatWrap.classList.toggle('overheated', st.overheated)
+    heatLabel.textContent = st.overheated ? 'VENTING…' : 'PRISM CARBINE'
+
+    const cr = st.charge > 0 ? st.charge : 0
+    chargeFill.style.strokeDashoffset = String(CIRC * (1 - cr))
+    cross.classList.toggle('charging', st.charging)
+    cross.classList.toggle('ready', st.charge >= 1)
+
+    soundBtn.classList.toggle('active', !st.muted)
+
+    // damage vignette
+    if (st.health < lastHealth) {
+      vignette.classList.remove('flash')
+      void vignette.offsetWidth
+      vignette.classList.add('flash')
+    }
+    lastHealth = st.health
+
+    // phase-driven UI
+    hud.classList.toggle('active', st.phase === 'playing' || st.phase === 'paused')
+    if (st.phase === 'title') renderTitle()
+    else if (st.phase === 'paused') renderPaused()
+    else if (st.phase === 'victory') renderResult(true)
+    else if (st.phase === 'defeat') renderResult(false)
+    else hideOverlay()
+  })
+
+  // ---- buttons + keys
   soundBtn.addEventListener('click', () => {
     unlockAudio()
     toggleMute()
   })
-  xrayBtn.addEventListener('click', () => setState({ xray: !getState().xray }))
+  const togglePause = () => {
+    const st = getState()
+    if (st.phase === 'playing') {
+      setState({ phase: 'paused' })
+      document.exitPointerLock?.()
+    } else if (st.phase === 'paused') resume()
+  }
+  pauseBtn.addEventListener('click', togglePause)
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyH') (modalOpen ? closeModal() : openHelp())
-    if (e.code === 'Escape' && modalOpen) closeModal()
-    if (e.code === 'KeyX') setState({ xray: !getState().xray })
+    if (e.code === 'Escape') togglePause()
     if (e.code === 'KeyM') {
       unlockAudio()
       toggleMute()
     }
   })
 
-  // state → DOM
-  subscribe((st) => {
-    zoneEl.textContent = ZONE_LABELS[st.zone]
-    const b: string[] = []
-    if (st.reducedMotion) b.push('reduced motion')
-    if (st.xray) b.push('x-ray')
-    if (st.muted) b.push('muted')
-    if (st.laps > 0) b.push(`laps: ${st.laps}`)
-    badges.textContent = b.join(' · ')
-    soundBtn.classList.toggle('active', !st.muted)
-    xrayBtn.classList.toggle('active', st.xray)
-    xray.classList.toggle('show', st.xray)
-    xrayNote.textContent = ZONE_TRICKS[st.zone]
-    resume.classList.toggle('show', entered && !st.locked && !st.touchMode && !modalOpen && !deps.qaMode)
-  })
-  xrayNote.textContent = ZONE_TRICKS[s.zone]
+  // pointer-lock loss auto-pauses on desktop
+  if (!deps.isTouch && !deps.qaMode) {
+    document.addEventListener('pointerlockchange', () => {
+      const locked = !!document.pointerLockElement
+      if (!locked && getState().phase === 'playing') setState({ phase: 'paused' })
+    })
+  }
 
   return {
-    toast: (text: string, ms = 4200) => {
+    toast: (text, ms = 4000) => {
       const t = el('div', 'hud-panel toast', text)
       toasts.appendChild(t)
       while (toasts.children.length > 3) toasts.firstChild?.remove()
       setTimeout(() => t.remove(), ms)
     },
+    banner: (title, sub) => {
+      bannerTitle.textContent = title
+      bannerSub.textContent = sub
+      banner.classList.remove('show')
+      void banner.offsetWidth
+      banner.classList.add('show')
+      setTimeout(() => banner.classList.remove('show'), 2600)
+    },
+    hitMarker: (kind) => {
+      hitmark.className = `hitmark show ${kind}`
+      void hitmark.offsetWidth
+      setTimeout(() => (hitmark.className = 'hitmark'), 220)
+    },
     setPrompt: (text) => {
       if (text) {
         hint.innerHTML = text.replace(/^E — /, '<b>E</b> — ')
         hint.classList.add('show')
-        interactBtn.classList.add('show')
       } else {
         hint.classList.remove('show')
-        interactBtn.classList.remove('show')
       }
     },
     setFps: (fps) => {
-      fpsEl.textContent = `${Math.round(fps)} fps`
+      const st = getState()
+      stFps.textContent = `${Math.round(fps)} fps`
+      stTime.textContent = fmtTime(st.elapsed)
+      stKills.textContent = `${st.anchorsSealedTotal} sealed`
     },
-    openHelp,
-    isModalOpen: () => modalOpen,
+    isBusy: () => {
+      const p = getState().phase
+      return p === 'title' || p === 'paused' || p === 'victory' || p === 'defeat' || p === 'loading'
+    },
   }
+}
+
+function controlsHtml(touch: boolean): string {
+  if (touch) {
+    return `<div class="ctl-grid">
+      <span><kbd>◀ joystick</kbd> move</span><span><kbd>drag</kbd> look</span>
+      <span><kbd>FIRE</kbd> shoot</span><span><kbd>PULSE</kbd> charge / seal</span>
+      <span><kbd>JUMP</kbd> jump</span><span><kbd>DUCK</kbd> crouch</span></div>`
+  }
+  return `<div class="ctl-grid">
+    <span><kbd>W A S D</kbd> move</span><span><kbd>Mouse</kbd> look</span>
+    <span><kbd>L-click</kbd> fire</span><span><kbd>R-click hold</kbd> charge → seal anchors</span>
+    <span><kbd>Space</kbd> jump</span><span><kbd>Ctrl</kbd> crouch</span>
+    <span><kbd>Shift</kbd> sprint</span><span><kbd>E</kbd> interact</span>
+    <span><kbd>Esc</kbd> pause</span><span><kbd>M</kbd> sound</span></div>`
+}
+
+function setupTouch(tc: HTMLElement, look: HTMLElement, deps: HudDeps): void {
+  const stick = tc.querySelector('.stick') as HTMLElement
+  const joy = tc.querySelector('.joystick') as HTMLElement
+  let joyId = -1
+  let cx = 0
+  let cy = 0
+  joy.addEventListener('pointerdown', (e) => {
+    joyId = e.pointerId
+    const r = joy.getBoundingClientRect()
+    cx = r.left + r.width / 2
+    cy = r.top + r.height / 2
+    joy.setPointerCapture(e.pointerId)
+  })
+  joy.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== joyId) return
+    const dx = (e.clientX - cx) / 45
+    const dy = (e.clientY - cy) / 45
+    const cl = (v: number) => Math.max(-1, Math.min(1, v))
+    deps.onMove(cl(-dy), cl(dx))
+    stick.style.transform = `translate(${cl(dx) * 22}px, ${cl(dy) * 22}px)`
+  })
+  const endJoy = (e: PointerEvent) => {
+    if (e.pointerId !== joyId) return
+    joyId = -1
+    deps.onMove(0, 0)
+    stick.style.transform = 'translate(0,0)'
+  }
+  joy.addEventListener('pointerup', endJoy)
+  joy.addEventListener('pointercancel', endJoy)
+
+  let lookId = -1
+  let lx = 0
+  let ly = 0
+  look.addEventListener('pointerdown', (e) => {
+    lookId = e.pointerId
+    lx = e.clientX
+    ly = e.clientY
+  })
+  look.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lookId) return
+    deps.onLook((e.clientX - lx) * 1.4, (e.clientY - ly) * 1.4)
+    lx = e.clientX
+    ly = e.clientY
+  })
+  const endLook = (e: PointerEvent) => {
+    if (e.pointerId === lookId) lookId = -1
+  }
+  look.addEventListener('pointerup', endLook)
+  look.addEventListener('pointercancel', endLook)
+
+  const btn = (sel: string, down: () => void, up?: () => void) => {
+    const b = tc.querySelector(sel) as HTMLElement
+    b.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      down()
+    })
+    if (up) {
+      b.addEventListener('pointerup', up)
+      b.addEventListener('pointercancel', up)
+    }
+  }
+  btn('.fire', () => deps.onFire(true), () => deps.onFire(false))
+  btn('.pulse', () => deps.onPulseDown(), () => deps.onPulseUp())
+  btn('.jump', () => deps.onJump())
+  let crouched = false
+  const cb = tc.querySelector('.crouch') as HTMLElement
+  cb.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    crouched = !crouched
+    cb.classList.toggle('on', crouched)
+    deps.onCrouch(crouched)
+  })
 }

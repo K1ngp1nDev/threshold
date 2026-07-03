@@ -1,5 +1,16 @@
-// Tiny observable store — no framework needed for a handful of flags.
+// Tiny observable store for THRESHOLD: BREACH.
 
+export type Phase =
+  | 'loading'
+  | 'title'
+  | 'briefing'
+  | 'playing'
+  | 'paused'
+  | 'victory'
+  | 'defeat'
+
+// Geometry regions (used by the world's zoneAt detection). Distinct from the
+// game's ordered combat zones, which the director owns.
 export type ZoneId =
   | 'atrium'
   | 'impossible-door'
@@ -8,34 +19,65 @@ export type ZoneId =
   | 'mirror-atrium'
 
 export interface AppState {
-  zone: ZoneId
-  laps: number
-  inMiniatureRoom: boolean
-  mirrorLight: boolean
-  corridorUnlocked: boolean
-  xray: boolean
-  muted: boolean
+  phase: Phase
+  // player vitals
+  health: number
+  maxHealth: number
+  shield: number
+  maxShield: number
+  // weapon
+  heat: number
+  overheated: boolean
+  charge: number // 0..1 while charging RMB
+  charging: boolean
+  // objective
+  zoneIndex: number
+  zoneCount: number
+  zoneLabel: string
+  objective: string
+  anchorsSealed: number
+  anchorsTotal: number
+  // run stats
+  kills: number
+  anchorsSealedTotal: number
+  elapsed: number // seconds, playing time
+  // system
+  hasWeapon: boolean
   reducedMotion: boolean
   touchMode: boolean
   quality: 'low' | 'medium' | 'high'
-  locked: boolean // pointer lock active
+  locked: boolean
+  muted: boolean
   ready: boolean
 }
 
 type Listener = (s: AppState) => void
 
 const state: AppState = {
-  zone: 'atrium',
-  laps: 0,
-  inMiniatureRoom: false,
-  mirrorLight: true,
-  corridorUnlocked: false,
-  xray: false,
-  muted: false,
+  phase: 'loading',
+  health: 100,
+  maxHealth: 100,
+  shield: 50,
+  maxShield: 50,
+  heat: 0,
+  overheated: false,
+  charge: 0,
+  charging: false,
+  zoneIndex: 0,
+  zoneCount: 4,
+  zoneLabel: 'Entrance Hall',
+  objective: 'Recover the Prism Carbine',
+  anchorsSealed: 0,
+  anchorsTotal: 0,
+  kills: 0,
+  anchorsSealedTotal: 0,
+  elapsed: 0,
+  hasWeapon: false,
   reducedMotion: false,
   touchMode: false,
   quality: 'high',
   locked: false,
+  muted: false,
   ready: false,
 }
 
@@ -62,9 +104,9 @@ export function subscribe(l: Listener): () => void {
 }
 
 export const ZONE_LABELS: Record<ZoneId, string> = {
-  atrium: 'Main Atrium',
-  'impossible-door': 'Exhibit I — Impossible Door',
-  'loop-corridor': 'Exhibit II — Loop Corridor',
-  'scale-gallery': 'Exhibit III — Scale Gallery',
-  'mirror-atrium': 'Exhibit IV — Mirror Atrium',
+  atrium: 'Entrance Hall',
+  'impossible-door': 'Room 402',
+  'loop-corridor': 'Loop Corridor',
+  'scale-gallery': 'Scale Gallery',
+  'mirror-atrium': 'Mirror Atrium',
 }

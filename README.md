@@ -1,68 +1,99 @@
-# THRESHOLD — a walkable museum of impossible spaces
+# THRESHOLD: BREACH — a first-person anomaly shooter where the architecture is the enemy
 
 **Live demo:** https://threshold.k1ngp1n.com
 
-You walk, first-person, through the *Threshold Institute* — a small museum whose
-four exhibits cannot exist. A shed that contains a cathedral-sized hall. A
-corridor that returns you to where you started, with the catalogue quietly
-rewritten. A dollhouse you step into. A reflection that disagrees with you.
-
-The point is not just the 3D scene — it is the **"how does it work?"** moment.
-Press <kbd>X</kbd> at any time and the museum turns itself inside out: wireframe
-mode plus a sector map showing the trick behind the room you are standing in.
-Every exhibit also has a curator's note that explains its own illusion.
+You are an anomaly-response operator inside the Threshold Institute. Space is
+failing across four wings. Recover the **Prism Carbine**, fight through the
+breach, and seal the anchors before the museum — and everything in it — folds in
+on you. A short (5–8 minute) browser FPS built on non-Euclidean architecture:
+enemies pour out of portals, your shots pass *through* the impossible door to hit
+what's on the other side, a corridor loops enemies in behind you, a diorama
+becomes a full-size arena, and your reflection fights back.
 
 Everything is **procedural** — no downloaded models, textures, fonts or audio.
 No backend. One static bundle behind nginx.
 
-![Entrance](docs/screenshots/threshold-entrance.png)
+![Title](docs/screenshots/threshold-breach-start.png)
 
-## The four exhibits
+## The hook — the impossible space *is* the mechanic
 
-| Exhibit | What you experience | How it actually works |
-|---|---|---|
-| **I — Impossible Door** | A 4.2 m garden-shed pavilion; through its door you see (and enter) a 36 m vaulted hall | True portal rendering: a second camera mirrors your pose through the door mapping into a render target, sampled in **screen space** (`gl_FragCoord`), so the quad reads as a hole in space. Crossing the plane teleports you 232 m east, momentum preserved — no cut, no fade |
-| **II — Loop Corridor** | Walk forward, arrive where you began; plaques and pedestal artifacts change each lap; after 3 laps a storage door unlocks | Two invisible **translation gates** silently shift you ±14 m between identical segments. Entry/exit pass through dark "light-locks" (museum baffles) that hide two more 286 m jumps |
-| **III — Scale Gallery** | A dollhouse reading room on a pedestal; interact, the camera dives in, and the same room is real around you — with the dollhouse on its table, again | The miniature and the room are the **same builder function** at scale 0.09 and 1.0. "Entering" is a camera dolly + fade + 300 m teleport. Recursion included |
-| **IV — Mirror Atrium** | A glass wall with your room reflected — but the statue faces away, the far door stands open, the plaque answers back, and an amber presence stands exactly where you stand | There is no mirror and no RTT: the twin room is **built by hand**, reflected across the glass plane, then edited. The orb maps your position through the plane every frame. The light switch behaves differently on each side |
+- **Shoot through the portal.** The Impossible Door renders Room 402 to a texture
+  in screen space; a charged shot's ray is re-mapped through the door so you can
+  hit enemies standing 250 m away, in another room, through the doorway.
+- **The corridor loops.** Wing II spawns hostiles from the "impossible doors" at
+  *both* ends — walk forward and something appears behind you.
+- **Scale is a weapon.** In Wing III you've been pulled into the diorama; the
+  dollhouse reading room is now a full-size arena (same builder, scale 1.0).
+- **The reflection fights back.** Wing IV spawns mirrored enemy pairs across the
+  glass; there is no mirror — the twin room is built by hand and edited.
+
+## The Prism Carbine
+
+| Input | Effect |
+|---|---|
+| **Left mouse** | fast energy shot (hitscan, tracer, muzzle flash, hit marker, recoil) |
+| **Right mouse (hold → release)** | charged shot — pierces and **collapses breach anchors** |
+| — | **heat**, not ammo: overfire and it vents; charged shots cost more heat |
+
+Anchors are shielded against normal fire (it pings) — only a charged Prism shot
+collapses them. Seal every anchor in a wing to stabilize it and open the breach
+gate to the next.
+
+## Zones & enemies
+
+Four gated wings: **Entrance Hall** (tutorial + through-portal shot) →
+**Loop Corridor** → **Scale Gallery** → **Mirror Atrium** (final breach, slow-mo
+collapse, result screen). Three enemy archetypes:
+
+- **Echo** — fast melee swarm, rushes you.
+- **Shard** — ranged, fires slow visible projectiles you can dodge (crouch/strafe).
+- **Warden** — heavy, blinks between portal points, guards anchors.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/impossible-door.png" alt="Impossible Door — the hall seen through the pavilion doorway" /></td>
-    <td><img src="docs/screenshots/loop-corridor.png" alt="Loop Corridor" /></td>
+    <td><img src="docs/screenshots/combat-entrance.png" alt="Entrance Hall combat" /></td>
+    <td><img src="docs/screenshots/weapon-and-portal.png" alt="Prism Carbine aimed at the Impossible Door" /></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/scale-gallery.png" alt="Scale Gallery diorama" /></td>
-    <td><img src="docs/screenshots/mirror-atrium.png" alt="Mirror Atrium with the amber presence" /></td>
+    <td><img src="docs/screenshots/loop-corridor-fight.png" alt="Loop Corridor firefight" /></td>
+    <td><img src="docs/screenshots/scale-gallery-arena.png" alt="Scale Gallery arena with a Warden" /></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/mirror-atrium-final.png" alt="Mirror Atrium final breach" /></td>
+    <td><img src="docs/screenshots/mobile.png" alt="Mobile touch controls" /></td>
   </tr>
 </table>
-
-## Stack
-
-- **Babylon.js 8** (chosen over three.js for built-in collide-and-slide FPS camera,
-  render-target plumbing and a WebXR-ready architecture), **TypeScript**, **Vite**
-- Custom portal system: screen-space RTT portals + deterministic translation gates
-- Procedural everything: concrete/floor textures are seeded-canvas `DynamicTexture`s,
-  signage is canvas text, ambience/SFX are synthesized WebAudio (noise + filters)
-- Tiny hand-rolled observable store (no framework in the render loop)
-- QA: Playwright end-to-end rig driving a deterministic `window.__THRESHOLD__` debug API
-- nginx + Docker for hosting
 
 ## Controls
 
 | Input | Action |
 |---|---|
-| <kbd>W A S D</kbd> / arrows | walk (<kbd>Shift</kbd> — brisk pace) |
-| Mouse (pointer lock) / drag | look |
-| <kbd>E</kbd> | interact — enter the model, read plaques, flip the mirror lights |
-| <kbd>X</kbd> | x-ray: wireframe + sector map + "how this zone works" |
-| <kbd>H</kbd> | help / about |
-| <kbd>M</kbd> | sound on/off |
+| <kbd>W A S D</kbd> | move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump · <kbd>Ctrl</kbd> crouch |
+| Mouse (pointer lock) | look · <kbd>L-click</kbd> fire · <kbd>R-click hold</kbd> charge → seal anchor |
+| <kbd>E</kbd> | interact (pick up the carbine, enter breach gates) |
+| <kbd>Esc</kbd> | pause · <kbd>M</kbd> sound |
 
-**Touch devices** get a cinematic tour mode: drag to look, ◀ ▶ to move between
-eight viewpoints, ◉ to interact. **`prefers-reduced-motion`** removes camera
-dollies, shimmer and idle animation (fast crossfades instead).
-**Quality tiers:** `?quality=low|medium|high` (auto: high on desktop, low on touch).
+**Touch:** left joystick to move, drag the right of the screen to look,
+**FIRE / PULSE / JUMP / DUCK** buttons. Full FPS on a phone is hard, so touch gets
+an aim-forgiving layout; it never breaks the composition.
+**`prefers-reduced-motion`** removes screen shake, muzzle strobe, slow-mo and idle
+bob. **Quality tiers:** `?quality=low|medium|high` (auto: high desktop, low touch)
+scale particles, bloom, hardware resolution and enemy spawn caps.
+
+## Stack
+
+- **Babylon.js 8** + **TypeScript** + **Vite** — chosen for built-in
+  collide-and-slide movement, render-target portals, and a WebXR-ready base.
+- Custom systems: fixed kinematic FPS controller, screen-space **portal renderer +
+  ray-remap** (shoot through walls of space), hitscan/heat weapon, hovering
+  enemy AI with projectiles, charged-shot destructible anchors, a **game director**
+  driving gated zones / spawn waves / win-lose.
+- Combat juice: tracers, muzzle flash, GPU spark bursts, self-correcting screen
+  shake + recoil, enemy dissolve, damage vignette, slow-mo on the final anchor.
+- Procedural everything (seeded-canvas textures, canvas signage, synthesized
+  WebAudio). Tiny observable store; no UI framework in the render loop.
+- Playwright QA rig driving a deterministic `window.__BREACH__` debug API.
+- nginx + Docker for hosting.
 
 ## Run locally
 
@@ -74,20 +105,18 @@ npm run build      # type-check + production bundle in dist/
 npm run preview    # serve the build on http://localhost:4173
 ```
 
-## QA
+## QA & screenshots
 
 ```bash
 npm run build
 npm run shots      # captures docs/screenshots/*.png from the production build
-npm run qa         # Playwright: 19 checks
+npm run qa         # Playwright: 16 checks
 ```
 
-The QA rig verifies: app boots without console errors, canvas is non-blank
-(pixel variance), WASD moves the player, every zone is reachable, the
-Impossible Door actually relocates you 232 m on crossing, the Loop Corridor
-loops (24 m walked → < 14 m net + lap counter), interact works end-to-end
-(pedestal → reading room), no horizontal overflow at 360/390/768/1440, and all
-screenshots are ≤ 4000×4000.
+The QA rig verifies: app loads, play starts (title → playing), the player can
+move / jump / crouch, shooting kills an enemy, a breach anchor can be destroyed,
+≥ 2 zones are reachable, no console errors, no horizontal overflow at
+360 / 390 / 768 / 1440, and all screenshots are ≤ 4000 × 4000.
 
 ## Docker
 
@@ -102,12 +131,19 @@ Behind Caddy on the VPS:
 threshold.k1ngp1n.com { reverse_proxy 127.0.0.1:3800 }
 ```
 
-## Screenshots
+## Compromises (honest notes)
 
-All in [`docs/screenshots/`](docs/screenshots): entrance, the four exhibits,
-mobile tour mode, reduced-motion. Regenerate with `npm run shots`.
+- The Impossible Door is **render + shoot-through only** — walking through it is
+  blocked by an invisible pane, so combat stays inside a defined arena. (The
+  original walk-through museum version lives in this repo's history.)
+- Enemies **hover and integrate** (no per-enemy mesh collisions) for perf with
+  many agents; the player uses full ellipsoid collide-and-slide.
+- Wing transitions are **fade-teleports through breach gates** rather than long
+  traversal, to keep the 5–8 minute slice tight and deterministic for QA.
+- Balance is tuned for a short run; enemy caps scale down on `?quality=low` and
+  touch.
 
 ---
 
 Part of the [k1ngp1n.com](https://k1ngp1n.com) demo collection. Synthetic
-content; the Threshold Institute is not a real museum — it couldn't be.
+content; the Threshold Institute is not a real place — it couldn't be.

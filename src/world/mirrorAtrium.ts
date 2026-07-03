@@ -8,7 +8,6 @@ import {
 import { MaterialKit, makeSignTexture, PALETTE } from '../core/materials'
 import { roomShell, WorldRegistry } from './registry'
 import type { Player } from '../core/player'
-import { getState, setState, subscribe } from '../state'
 
 // Exhibit IV — Mirror Atrium. A wall of glass; behind it, the same room built
 // mirrored by hand. The reflection is almost right: the statue faces the wrong
@@ -150,39 +149,9 @@ export function buildMirrorAtrium(
   twinLight.intensity = 0.22
   twinLight.range = 22
 
-  const applyLights = () => {
-    const on = getState().mirrorLight
-    realLight.intensity = on ? 0.78 : 0.08
-    twinLight.intensity = on ? 0.28 : 0.7 // the reflection prefers the dark
-  }
-  applyLights()
-  subscribe(applyLights)
-
-  let toldOnce = false
-  reg.addInteractable({
-    id: 'mirror-switch',
-    position: new Vector3(-7.6, 1.2, -13.2),
-    radius: 2.2,
-    prompt: 'E — lights',
-    enabled: () => true,
-    onInteract: () => {
-      setState({ mirrorLight: !getState().mirrorLight })
-      if (!toldOnce) {
-        toldOnce = true
-        toast('The reflection prefers the dark.')
-      }
-    },
-  })
-
-  reg.addInteractable({
-    id: 'mirror-note',
-    position: new Vector3(-13.8, 1.8, -18),
-    radius: 2.6,
-    prompt: 'E — curator’s note',
-    enabled: () => true,
-    onInteract: () =>
-      toast('There is no mirror. The room behind the glass is built by hand, reflected across x = 2 — then edited. The orb is your position, mapped through the plane every frame.'),
-  })
+  realLight.intensity = 0.78
+  twinLight.intensity = 0.34 // the reflection keeps to the dark
+  void toast
 
   return {
     updateOrb: (p: Vector3, time: number, reduced: boolean) => {

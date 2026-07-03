@@ -13,10 +13,13 @@ import { resolveQuality } from './core/quality'
 import { makeMaterials } from './core/materials'
 import { Player, watchPointerLock } from './core/player'
 import { InteractionManager } from './core/interact'
-import { fadeTeleport, isTransitioning } from './core/transitions'
-import { unlockAudio, playWhoosh } from './core/audio'
+import { isTransitioning } from './core/transitions'
+import { unlockAudio } from './core/audio'
+import { FX, applyShake, tickTimeScale, timeScale } from './core/fx'
 import { buildMuseum } from './world/museum'
+import { Director } from './core/director'
 import { createHud } from './ui/hud'
+import type { EnemyType } from './core/enemies'
 
 const params = new URLSearchParams(location.search)
 const qaMode = params.get('qa') === '1'
@@ -28,179 +31,176 @@ const isTouch =
   (window.matchMedia('(pointer: coarse)').matches && (navigator.maxTouchPoints > 0 || 'ontouchstart' in window))
 const reducedMotion = forceReduce || window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const quality = resolveQuality(isTouch)
-
 setState({ touchMode: isTouch, reducedMotion, quality: quality.tier })
 
 const canvas = document.getElementById('c') as HTMLCanvasElement
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
-const engine = new Engine(canvas, true, {
-  powerPreference: 'high-performance',
-  stencil: false,
-  preserveDrawingBuffer: false,
-})
+const engine = new Engine(canvas, true, { powerPreference: 'high-performance', stencil: false })
 const dpr = window.devicePixelRatio || 1
-engine.setHardwareScalingLevel(
-  quality.tier === 'high' ? 1 / Math.min(dpr, 1.75) : quality.tier === 'medium' ? 1 : 1.5,
-)
+engine.setHardwareScalingLevel(quality.tier === 'high' ? 1 / Math.min(dpr, 1.75) : quality.tier === 'medium' ? 1 : 1.5)
 
 const scene = new Scene(engine)
 scene.clearColor = new Color4(0.05, 0.047, 0.043, 1)
 scene.ambientColor = new Color3(0, 0, 0)
 scene.fogMode = Scene.FOGMODE_EXP2
-scene.fogDensity = 0.0042
+scene.fogDensity = 0.0038
 scene.fogColor = new Color3(0.055, 0.052, 0.048)
 scene.collisionsEnabled = true
-scene.gravity = new Vector3(0, -0.19, 0)
 
 const mats = makeMaterials(scene)
-
-// player is created first (world builders need it for gates/portals)
 const player = new Player(scene, canvas, new Vector3(-11, 1.8, 2), 1.85)
 watchPointerLock(canvas)
 
-// world
-let toastFn: (t: string) => void = () => undefined
-const museum = buildMuseum(scene, mats, player, quality.portalRatio, (t) => toastFn(t))
+const museum = buildMuseum(scene, mats, player, quality.portalRatio)
 player.teleport(museum.spawn.pos, museum.spawn.yaw, museum.spawn.pitch)
 
-// interactions
-const interactions = new InteractionManager(museum.registry, player, (text) => hud.setPrompt(text))
-
-// HUD
-const hud = createHud({
-  isTouch,
-  qaMode,
-  viewpoints: museum.viewpoints,
-  onEnter: () => {
-    player.requestLock()
-  },
-  onInteract: () => interactions.trigger(),
-  onViewpoint: (id) => {
-    const pose = museum.poses[id]
-    if (pose) {
-      void fadeTeleport(scene, player, { pos: pose.pos, yaw: pose.yaw, pitch: pose.pitch })
-    }
-  },
-  getPlayerPos: () => ({
-    x: player.camera.position.x,
-    y: player.camera.position.y,
-    z: player.camera.position.z,
-  }),
-})
-toastFn = (t) => hud.toast(t)
-
-// re-lock pointer + audio unlock on canvas click
-canvas.addEventListener('pointerdown', () => {
-  unlockAudio()
-  if (!isTouch && !hud.isModalOpen()) player.requestLock()
-})
-
-// pause player while help modal is open
-subscribe((s) => {
-  scene.forceWireframe = s.xray
-})
-
-// post-processing per quality tier
-if (quality.glow) {
-  const glow = new GlowLayer('glow', scene, { mainTextureRatio: 0.5 })
-  glow.intensity = 0.65
-}
+// post-processing
+const glow = quality.glow ? new GlowLayer('glow', scene, { mainTextureRatio: 0.5 }) : null
+if (glow) glow.intensity = 0.8
 const pipeline = new DefaultRenderingPipeline('drp', false, scene, [player.camera])
 pipeline.fxaaEnabled = quality.fxaa
 pipeline.bloomEnabled = quality.bloom
 pipeline.bloomThreshold = 0.72
-pipeline.bloomWeight = 0.22
+pipeline.bloomWeight = 0.24
 pipeline.bloomKernel = 48
 pipeline.imageProcessingEnabled = true
-pipeline.imageProcessing.contrast = 1.16
-pipeline.imageProcessing.exposure = 1.06
+pipeline.imageProcessing.contrast = 1.18
+pipeline.imageProcessing.exposure = 1.05
 pipeline.imageProcessing.vignetteEnabled = true
-pipeline.imageProcessing.vignetteWeight = 2.4
+pipeline.imageProcessing.vignetteWeight = 2.2
 pipeline.imageProcessing.vignetteColor = new Color4(0.03, 0.025, 0.02, 0)
 
-// zone tracking + whoosh on zone change
-let lastZone = getState().zone
-scene.onBeforeRenderObservable.add(() => {
-  const z = museum.registry.zoneAt(player.camera.position)
-  if (z && z !== lastZone) {
-    lastZone = z
-    setState({ zone: z })
-    if (z !== 'atrium') playWhoosh()
-  }
+const fx = new FX(scene, glow, quality.tier !== 'low')
+
+// director is created after HUD, but HUD callbacks reference it lazily
+let director: Director
+const interactions = new InteractionManager(museum.registry, player, (t) => hud.setPrompt(t))
+
+const hud = createHud({
+  isTouch,
+  qaMode,
+  onStart: () => {
+    unlockAudio()
+    director.start()
+    player.requestLock()
+  },
+  onRestart: () => {
+    director.restart()
+    player.requestLock()
+  },
+  onInteract: () => interactions.trigger(),
+  onLook: (dx, dy) => player.rotate(dx, dy),
+  onMove: (fwd, side) => player.setMove(fwd, side),
+  onJump: () => player.jump(),
+  onCrouch: (on) => player.setCrouch(on),
+  onFire: (down) => director.weapon.setPrimary(down),
+  onPulseDown: () => director.weapon.beginCharge(),
+  onPulseUp: () => director.weapon.releaseCharge(),
 })
 
-// QA/debug driver — deterministic hooks for Playwright and the screenshot rig
-interface WalkJob {
-  remaining: number
-  resolve: () => void
-}
-let walkJob: WalkJob | null = null
+director = new Director(scene, player, {
+  scene,
+  poses: museum.poses,
+  wallMeshes: museum.wallMeshes,
+  portal: museum.portal,
+  clearInteractables: museum.clearInteractables,
+  addInteractable: museum.addInteractable,
+  removeInteractable: museum.removeInteractable,
+}, fx, {
+  toast: (t, ms) => hud.toast(t, ms),
+  banner: (title, sub) => hud.banner(title, sub),
+  hitMarker: (kind) => hud.hitMarker(kind),
+})
 
+// desktop mouse fire
+window.addEventListener('mousedown', (e) => {
+  if (isTouch || getState().phase !== 'playing') return
+  if (e.button === 0) director.weapon.setPrimary(true)
+  else if (e.button === 2) director.weapon.beginCharge()
+})
+window.addEventListener('mouseup', (e) => {
+  if (isTouch) return
+  if (e.button === 0) director.weapon.setPrimary(false)
+  else if (e.button === 2) director.weapon.releaseCharge()
+})
+canvas.addEventListener('pointerdown', () => {
+  unlockAudio()
+  if (!isTouch && getState().phase === 'playing' && !document.pointerLockElement) player.requestLock()
+})
+
+subscribe((st) => {
+  scene.fogDensity = st.phase === 'playing' ? 0.0038 : 0.006
+})
+
+// ---- main loop
+scene.onBeforeRenderObservable.add(() => {
+  const realDt = Math.min(engine.getDeltaTime() / 1000, 0.05)
+  tickTimeScale(realDt)
+  const dt = realDt * timeScale()
+
+  const playing = getState().phase === 'playing'
+  player.enabled = playing && !isTransitioning()
+
+  player.update(dt)
+  applyShake(player.camera, realDt)
+  museum.update(engine)
+  if (playing) {
+    director.update(dt, realDt)
+    interactions.update()
+  }
+  fx.update(realDt)
+})
+
+engine.runRenderLoop(() => scene.render())
+window.addEventListener('resize', () => engine.resize())
+window.setInterval(() => hud.setFps(engine.getFps()), 400)
+
+// ---- debug / QA API
 const api = {
-  version: '1.0.0',
+  version: '2.0.0-breach',
   ready: false,
-  zone: () => getState().zone,
+  start: () => director.start(),
+  restart: () => director.restart(),
   state: () => ({ ...getState() }),
   pos: () => [player.camera.position.x, player.camera.position.y, player.camera.position.z] as const,
-  poseNames: () => Object.keys(museum.poses),
-  teleport: (id: string) => {
-    const pose = museum.poses[id]
-    if (!pose) return false
-    player.teleport(pose.pos, pose.yaw, pose.pitch)
-    return true
-  },
+  setMove: (f: number, s: number) => player.setMove(f, s),
+  stop: () => player.setMove(0, 0),
+  jump: () => player.jump(),
+  crouch: (on: boolean) => player.setCrouch(on),
   look: (yaw: number, pitch = 0) => {
     player.camera.rotation.y = yaw
     player.camera.rotation.x = pitch
   },
-  walk: (meters: number) =>
-    new Promise<void>((resolve) => {
-      walkJob?.resolve()
-      walkJob = { remaining: meters, resolve }
-    }),
   interact: () => {
     interactions.trigger()
     return interactions.current?.id ?? null
   },
+  invuln: (on: boolean) => player.setInvuln(on),
   currentInteractable: () => interactions.current?.id ?? null,
-}
-;(window as unknown as { __THRESHOLD__: typeof api }).__THRESHOLD__ = api
-
-// main loop
-scene.onBeforeRenderObservable.add(() => {
-  if (!isTransitioning()) player.enabled = !hud.isModalOpen()
-
-  if (walkJob && player.enabled) {
-    const dt = Math.min(engine.getDeltaTime() / 1000, 0.05)
-    const step = Math.min(3.8 * dt, walkJob.remaining)
-    const yaw = player.camera.rotation.y
-    player.camera.cameraDirection.addInPlace(new Vector3(Math.sin(yaw) * step, 0, Math.cos(yaw) * step))
-    walkJob.remaining -= step
-    if (walkJob.remaining <= 0.001) {
-      walkJob.resolve()
-      walkJob = null
+  ...(() => {
+    const d = () => director.debug()
+    return {
+      shoot: () => d().shoot(),
+      chargedShoot: () => d().chargedShoot(),
+      giveWeapon: () => d().giveWeapon(),
+      enterZone: (i: number) => d().enterZone(i),
+      zoneCount: () => d().zoneCount,
+      enemyCount: () => d().enemyCount(),
+      spawnEnemy: (t: EnemyType) => d().spawnEnemy(t),
+      killAll: () => d().killAll(),
+      sealNearestAnchor: () => d().sealNearestAnchor(),
+      anchorsRemaining: () => d().anchorsRemaining(),
     }
-  }
+  })(),
+}
+;(window as unknown as { __BREACH__: typeof api }).__BREACH__ = api
 
-  player.update()
-  museum.update(engine)
-  interactions.update()
-})
-
-engine.runRenderLoop(() => {
-  scene.render()
-})
-
-window.addEventListener('resize', () => engine.resize())
-
-// fps meter
-window.setInterval(() => hud.setFps(engine.getFps()), 500)
-
-// reveal
 scene.executeWhenReady(() => {
   scene.render()
   document.getElementById('veil')?.classList.add('gone')
-  api.ready = true
   if (reducedMotion) document.body.classList.add('reduce-motion')
+  api.ready = true
+  setState({ ready: true, phase: 'title' })
+  if (qaMode) director.start()
 })
