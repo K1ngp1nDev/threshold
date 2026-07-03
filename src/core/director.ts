@@ -152,7 +152,7 @@ export class Director implements CombatContext {
 
   // ---------------------------------------------------------------- flow
   start(): void {
-    setState({ phase: 'playing', hasWeapon: false, kills: 0, anchorsSealedTotal: 0, elapsed: 0 })
+    setState({ phase: 'playing', hasWeapon: true, kills: 0, anchorsSealedTotal: 0, elapsed: 0 })
     this.player.resetVitals()
     this.zoneIndex = 0
     this.player.teleport(this.zones[0].entry.pos, this.zones[0].entry.yaw, 0)
@@ -175,7 +175,7 @@ export class Director implements CombatContext {
     this.disposeAnchors()
     this.clearExitGate()
     this.world.clearInteractables()
-    this.breachActive = i !== 0 // zone 0 waits for the weapon pickup
+    this.breachActive = false
     this.spawnTimer = 0.6
     this.enemies.setBounds(z.bounds)
 
@@ -184,7 +184,7 @@ export class Director implements CombatContext {
       zoneLabel: z.label,
       anchorsSealed: 0,
       anchorsTotal: z.anchors.length,
-      objective: i === 0 && !getState().hasWeapon ? 'Recover the Prism Carbine' : `Seal the breach — 0 / ${z.anchors.length}`,
+      objective: `Seal the breach — 0 / ${z.anchors.length}`,
     })
 
     if (teleport) {
@@ -194,62 +194,11 @@ export class Director implements CombatContext {
     }
 
     for (const a of z.anchors) this.anchors.push(new Anchor(this.scene, a, this.fx))
-
-    if (i === 0 && !getState().hasWeapon) {
-      this.spawnWeaponPickup()
-    } else {
-      this.beginBreach()
-    }
-
+    this.beginBreach()
     if (z.throughPortal) this.spawnHallEnemies()
 
-    if (i === 0 && !getState().hasWeapon) {
-      this.hud.banner('RECOVER THE PRISM CARBINE', 'It’s on the plinth ahead — press E')
-      this.hud.toast('Walk up to the glowing plinth ahead and press E to arm the Prism Carbine.', 6000)
-    } else {
-      this.hud.banner(`WING ${i + 1} / ${this.zones.length}`, z.label)
-      this.hud.toast(z.briefing, 5000)
-    }
-  }
-
-  private spawnWeaponPickup(): void {
-    const pos = new Vector3(-7, 1.15, 1.4)
-    const node = new TransformNode('weapon-pickup-node', this.scene)
-    node.position.copyFrom(pos)
-    const ped = MeshBuilder.CreateCylinder('wp-ped', { height: 1.0, diameter: 0.5, tessellation: 8 }, this.scene)
-    const pm = new StandardMaterial('wp-ped-mat', this.scene)
-    pm.diffuseColor = new Color3(0.09, 0.085, 0.08)
-    ped.material = pm
-    ped.position.y = -0.65
-    ped.parent = node
-    const icon = MeshBuilder.CreateBox('wp-icon', { width: 0.1, height: 0.12, depth: 0.5 }, this.scene)
-    const im = new StandardMaterial('wp-icon-mat', this.scene)
-    im.emissiveColor = ANOMALY.clone()
-    im.diffuseColor = Color3.Black()
-    im.disableLighting = true
-    icon.material = im
-    icon.parent = node
-    this.scene.onBeforeRenderObservable.add(() => {
-      if (node.isDisposed()) return
-      if (!getState().reducedMotion) icon.rotation.y += this.scene.getEngine().getDeltaTime() / 1000
-    })
-
-    this.world.addInteractable({
-      id: 'weapon',
-      position: pos,
-      radius: 5,
-      prompt: 'E — take the Prism Carbine',
-      enabled: () => !getState().hasWeapon,
-      onInteract: () => {
-        node.dispose(false, true)
-        setState({ hasWeapon: true })
-        this.world.removeInteractable('weapon')
-        this.hud.banner('BREACH DETECTED', 'Space folds. Hostiles inbound.')
-        this.hud.toast('Left mouse fires · Right mouse charges to seal anchors', 6000)
-        this.beginBreach()
-      },
-    })
-    setState({ objective: 'Recover the Prism Carbine' })
+    this.hud.banner(`WING ${i + 1} / ${this.zones.length}`, z.label)
+    this.hud.toast(z.briefing, 5000)
   }
 
   private beginBreach(): void {

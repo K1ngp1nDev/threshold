@@ -94,10 +94,7 @@ const hud = createHud({
   onMove: (fwd, side) => player.setMove(fwd, side),
   onJump: () => player.jump(),
   onCrouch: (on) => player.setCrouch(on),
-  onFire: (down) => {
-    if (down && !getState().hasWeapon) return armHint()
-    director.weapon.setPrimary(down)
-  },
+  onFire: (down) => director.weapon.setPrimary(down),
   onPulseDown: () => director.weapon.beginCharge(),
   onPulseUp: () => director.weapon.releaseCharge(),
 })
@@ -117,17 +114,8 @@ director = new Director(scene, player, {
 })
 
 // desktop mouse fire
-let lastArmHint = 0
-const armHint = () => {
-  const now = performance.now()
-  if (now - lastArmHint > 2500) {
-    hud.toast('No weapon yet — walk to the glowing plinth ahead and press E to take the Prism Carbine.', 3200)
-    lastArmHint = now
-  }
-}
 window.addEventListener('mousedown', (e) => {
   if (isTouch || getState().phase !== 'playing') return
-  if (!getState().hasWeapon) return armHint()
   if (e.button === 0) director.weapon.setPrimary(true)
   else if (e.button === 2) director.weapon.beginCharge()
 })

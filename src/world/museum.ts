@@ -65,12 +65,21 @@ export function buildMuseum(
     glowAmp: 0.18,
     allowCross: false,
   })
-  // invisible pane across the doorway (blocks the player, not shots or enemies)
-  const pane = MeshBuilder.CreateBox('door-pane', { width: 0.2, height: 2.7, depth: 1.7 }, scene)
-  pane.position.set(4.9, 1.35, -2.5)
-  pane.isVisible = false
-  pane.isPickable = false
-  pane.checkCollisions = true
+  // invisible barriers: keep the player inside each combat arena. They block the
+  // player only — not shots (not in wallMeshes) and not the hovering enemies.
+  // Doorway pane (Impossible Door) + the three atrium openings (N/W/S) so Wing 1
+  // stays in the atrium and you can't wander into other wings' dark geometry.
+  const barrier = (name: string, x: number, y: number, z: number, w: number, h: number, d: number) => {
+    const b = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene)
+    b.position.set(x, y, z)
+    b.isVisible = false
+    b.isPickable = false
+    b.checkCollisions = true
+  }
+  barrier('door-pane', 4.9, 1.35, -2.5, 0.2, 2.7, 1.7)
+  barrier('seal-n', -6, 1.6, 10, 2.6, 3.2, 0.3) // to loop-corridor light-lock
+  barrier('seal-w', -15, 1.6, -4, 0.3, 3.2, 2.8) // to scale gallery room
+  barrier('seal-s', -6, 1.6, -10, 3.0, 3.2, 0.3) // to mirror atrium passage
 
   // --- lights: unscoped hemi lights everything (incl. dynamic enemies/weapon);
   //     point lights are scoped per sector to respect the per-mesh light cap.
