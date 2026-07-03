@@ -13,14 +13,14 @@ export interface HudDeps {
   onJump: () => void
   onCrouch: (on: boolean) => void
   onFire: (down: boolean) => void
-  onPulseDown: () => void
-  onPulseUp: () => void
+  onPulse: () => void
 }
 
 export interface Hud {
   toast: (text: string, ms?: number) => void
   banner: (title: string, sub: string) => void
   hitMarker: (kind: 'hit' | 'kill' | 'shielded') => void
+  pulseFlash: () => void
   setPrompt: (text: string | null) => void
   setFps: (fps: number) => void
   isBusy: () => boolean // title / paused / result — game input suspended
@@ -67,6 +67,13 @@ export function createHud(deps: HudDeps): Hud {
   const hitmark = cross.querySelector('.hitmark') as HTMLElement
   const CIRC = 2 * Math.PI * 30
   chargeFill.style.strokeDasharray = String(CIRC)
+
+  // pulse-flash overlay (Anomaly Pulse feedback)
+  const pulseFx = el('div', 'pulse-flash')
+  hud.appendChild(pulseFx)
+  // low-health warning vignette
+  const lowhp = el('div', 'lowhp')
+  hud.appendChild(lowhp)
 
   // top objective bar
   const top = el('div', 'hud-panel obj-bar')
@@ -239,10 +246,10 @@ export function createHud(deps: HudDeps): Hud {
     heatWrap.classList.toggle('overheated', st.overheated)
     heatLabel.textContent = st.overheated ? 'VENTING…' : 'PRISM CARBINE'
 
-    const cr = st.charge > 0 ? st.charge : 0
-    chargeFill.style.strokeDashoffset = String(CIRC * (1 - cr))
-    cross.classList.toggle('charging', st.charging)
-    cross.classList.toggle('ready', st.charge >= 1)
+    chargeFill.style.strokeDashoffset = String(CIRC * (1 - st.pulse))
+    cross.classList.toggle('charging', st.pulse < 1)
+    cross.classList.toggle('ready', st.pulseReady)
+    lowhp.classList.toggle('show', st.phase === 'playing' && st.health <= 30)
 
     soundBtn.classList.toggle('active', !st.muted)
 
@@ -312,6 +319,11 @@ export function createHud(deps: HudDeps): Hud {
       void hitmark.offsetWidth
       setTimeout(() => (hitmark.className = 'hitmark'), 220)
     },
+    pulseFlash: () => {
+      pulseFx.classList.remove('go')
+      void pulseFx.offsetWidth
+      pulseFx.classList.add('go')
+    },
     setPrompt: (text) => {
       if (text) {
         hint.innerHTML = deps.isTouch
@@ -339,12 +351,13 @@ function controlsHtml(touch: boolean): string {
   if (touch) {
     return `<div class="ctl-grid">
       <span><kbd>◀ joystick</kbd> move</span><span><kbd>drag</kbd> look</span>
-      <span><kbd>FIRE</kbd> shoot</span><span><kbd>PULSE</kbd> charge / seal</span>
-      <span><kbd>JUMP</kbd> jump</span><span><kbd>DUCK</kbd> crouch</span></div>`
+      <span><kbd>FIRE</kbd> shoot</span><span><kbd>PULSE</kbd> Anomaly Pulse</span>
+      <span><kbd>JUMP</kbd> jump</span><span><kbd>DUCK</kbd> crouch</span>
+      <span><kbd>TAP hint</kbd> interact</span><span></span></div>`
   }
   return `<div class="ctl-grid">
     <span><kbd>W A S D</kbd> move</span><span><kbd>Mouse</kbd> look</span>
-    <span><kbd>L-click</kbd> fire</span><span><kbd>R-click hold</kbd> charge → seal anchors</span>
+    <span><kbd>L-click</kbd> fire (seal exposed anchors)</span><span><kbd>R-click</kbd> Anomaly Pulse (expose)</span>
     <span><kbd>Space</kbd> jump</span><span><kbd>Ctrl</kbd> crouch</span>
     <span><kbd>Shift</kbd> sprint</span><span><kbd>E</kbd> interact</span>
     <span><kbd>Esc</kbd> pause</span><span><kbd>M</kbd> sound</span></div>`
@@ -412,7 +425,7 @@ function setupTouch(tc: HTMLElement, look: HTMLElement, deps: HudDeps): void {
     }
   }
   btn('.fire', () => deps.onFire(true), () => deps.onFire(false))
-  btn('.pulse', () => deps.onPulseDown(), () => deps.onPulseUp())
+  btn('.pulse', () => deps.onPulse())
   btn('.jump', () => deps.onJump())
   let crouched = false
   const cb = tc.querySelector('.crouch') as HTMLElement

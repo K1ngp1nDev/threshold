@@ -1,4 +1,4 @@
-// Captures the 7 documentation screenshots for THRESHOLD: BREACH.
+// Captures the 8 documentation screenshots for THRESHOLD: BREACH.
 // Run `npm run build` first.
 import { mkdirSync } from 'node:fs'
 import { chromium } from 'playwright'
@@ -19,7 +19,7 @@ async function ready(context, url) {
 }
 const call = (page, fn, ...a) => page.evaluate(({ fn, a }) => window.__BREACH__[fn](...a), { fn, a })
 
-// --- title screen (no qa so it stays on the title)
+// --- title screen
 {
   const c = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
   const p = await ready(c, 'http://localhost:4177/?quality=high')
@@ -31,24 +31,22 @@ const call = (page, fn, ...a) => page.evaluate(({ fn, a }) => window.__BREACH__[
 
 // --- desktop combat shots
 const desk = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
-const page = await ready(desk, 'http://localhost:4177/?qa=1&quality=high')
+const page = await ready(desk, 'http://localhost:4177/?qa=1&quality=high&seed=demo')
 await call(page, 'invuln', true)
 await call(page, 'giveWeapon')
 await page.waitForTimeout(900)
 
-// combat-entrance
+// combat-entrance (shields up)
 await call(page, 'shoot')
 await page.waitForTimeout(25)
 await page.screenshot({ path: `${OUT}/combat-entrance.png` })
 console.log('shot combat-entrance')
 
-// weapon-and-portal (aim at the Impossible Door)
-await call(page, 'look', 1.5, 0)
-await page.waitForTimeout(300)
-await call(page, 'shoot')
-await page.waitForTimeout(25)
-await page.screenshot({ path: `${OUT}/weapon-and-portal.png` })
-console.log('shot weapon-and-portal')
+// anomaly-pulse (right after a pulse — ring, flash, exposed anchors)
+await call(page, 'pulse')
+await page.waitForTimeout(60)
+await page.screenshot({ path: `${OUT}/anomaly-pulse.png` })
+console.log('shot anomaly-pulse')
 
 const zones = [
   ['loop-corridor-fight', 1, ['echo', 'shard']],
@@ -65,9 +63,15 @@ for (const [file, z, types] of zones) {
   await page.screenshot({ path: `${OUT}/${file}.png` })
   console.log('shot', file)
 }
+
+// victory screen
+await call(page, 'forceVictory')
+await page.waitForTimeout(1300)
+await page.screenshot({ path: `${OUT}/victory-screen.png` })
+console.log('shot victory-screen')
 await desk.close()
 
-// --- mobile (touch controls visible)
+// --- mobile
 const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })
 const mp = await ready(mob, 'http://localhost:4177/?qa=1&quality=low&touch=1')
 await call(mp, 'invuln', true)

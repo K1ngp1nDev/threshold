@@ -126,6 +126,46 @@ export function playClick(): void {
   }
 }
 
+export function playPulse(): void {
+  try {
+    if (!ensure() || !ctx) return
+    const t = ctx.currentTime
+    // low thump
+    const o = ctx.createOscillator()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(120, t)
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.5)
+    const g = envGain(t, 0.5, 0.6)
+    if (g) {
+      o.connect(g)
+      o.start(t)
+      o.stop(t + 0.62)
+    }
+    // shimmer sweep
+    const dur = 0.4
+    const len = Math.floor(ctx.sampleRate * dur)
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    const bp = ctx.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.Q.value = 2
+    bp.frequency.setValueAtTime(400, t)
+    bp.frequency.exponentialRampToValueAtTime(4000, t + dur)
+    const g2 = envGain(t, 0.14, dur)
+    if (g2) {
+      src.connect(bp)
+      bp.connect(g2)
+      src.start(t)
+      src.stop(t + dur)
+    }
+  } catch {
+    /* no-op */
+  }
+}
+
 export function playChime(): void {
   try {
     if (!ensure() || !ctx) return

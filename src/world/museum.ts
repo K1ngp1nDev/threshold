@@ -7,6 +7,7 @@ import {
   MeshBuilder,
   PointLight,
   Scene,
+  StandardMaterial,
   Vector3,
 } from '@babylonjs/core'
 import { MaterialKit, PALETTE } from '../core/materials'
@@ -80,6 +81,26 @@ export function buildMuseum(
   barrier('seal-n', -6, 1.6, 10, 2.6, 3.2, 0.3) // to loop-corridor light-lock
   barrier('seal-w', -15, 1.6, -4, 0.3, 3.2, 2.8) // to scale gallery room
   barrier('seal-s', -6, 1.6, -10, 3.0, 3.2, 0.3) // to mirror atrium passage
+
+  // faint teal "breach seal" membranes over the sealed openings, so the
+  // invisible barriers read as intentional containment rather than a bug.
+  const veilMat = new StandardMaterial('veil-mat', scene)
+  veilMat.emissiveColor = new Color3(0.35, 0.85, 0.78)
+  veilMat.diffuseColor = Color3.Black()
+  veilMat.disableLighting = true
+  veilMat.alpha = 0.12
+  veilMat.backFaceCulling = false
+  const veil = (name: string, x: number, z: number, w: number, yaw: number) => {
+    const p = MeshBuilder.CreatePlane(name, { width: w, height: 2.9 }, scene)
+    p.position.set(x, 1.45, z)
+    p.rotation.y = yaw
+    p.material = veilMat
+    p.isPickable = false
+    p.checkCollisions = false
+  }
+  veil('veil-n', -6, 10, 1.9, 0)
+  veil('veil-w', -15, -4, 2.1, Math.PI / 2)
+  veil('veil-s', -6, -10, 2.3, 0)
 
   // --- lights: unscoped hemi lights everything (incl. dynamic enemies/weapon);
   //     point lights are scoped per sector to respect the per-mesh light cap.

@@ -28,8 +28,9 @@ export interface AppState {
   // weapon
   heat: number
   overheated: boolean
-  charge: number // 0..1 while charging RMB
-  charging: boolean
+  // anomaly pulse (signature RMB ability)
+  pulse: number // 0..1 recharge
+  pulseReady: boolean
   // objective
   zoneIndex: number
   zoneCount: number
@@ -61,8 +62,8 @@ const state: AppState = {
   maxShield: 50,
   heat: 0,
   overheated: false,
-  charge: 0,
-  charging: false,
+  pulse: 1,
+  pulseReady: true,
   zoneIndex: 0,
   zoneCount: 4,
   zoneLabel: 'Entrance Hall',

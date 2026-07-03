@@ -9,6 +9,7 @@ import {
   ParticleSystem,
   PointLight,
   Scene,
+  StandardMaterial,
   UniversalCamera,
   Vector3,
 } from '@babylonjs/core'
@@ -139,6 +140,36 @@ export class FX {
     l.intensity = intensity
     l.range = 8
     this.lights.push({ light: l, life: 0, max: ms / 1000, base: intensity })
+  }
+
+  /** Anomaly Pulse shockwave — an expanding ground ring + burst + heavy shake. */
+  pulseWave(pos: Vector3): void {
+    addTrauma(0.5)
+    this.sparks(pos.add(new Vector3(0, -0.6, 0)), 'anomaly', 34)
+    this.flash(pos, ANOMALY, 2.4, 220)
+    const ring = MeshBuilder.CreateTorus('pulse-ring', { diameter: 1, thickness: 0.14, tessellation: 48 }, this.scene)
+    ring.position.set(pos.x, 0.15, pos.z)
+    ring.rotation.x = Math.PI / 2
+    const mat = new StandardMaterial('pulse-ring-mat', this.scene)
+    mat.emissiveColor = ANOMALY.clone()
+    mat.diffuseColor = Color3.Black()
+    mat.disableLighting = true
+    ring.material = mat
+    ring.isPickable = false
+    const reduced = getState().reducedMotion
+    const dur = reduced ? 0.2 : 0.55
+    let t = 0
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      t += this.scene.getEngine().getDeltaTime() / 1000
+      const k = Math.min(1, t / dur)
+      const s = 1 + k * 22
+      ring.scaling.set(s, s, s)
+      mat.alpha = 1 - k
+      if (k >= 1) {
+        this.scene.onBeforeRenderObservable.remove(obs)
+        ring.dispose()
+      }
+    })
   }
 
   /** Dissolve + dispose a mesh (enemy death). */

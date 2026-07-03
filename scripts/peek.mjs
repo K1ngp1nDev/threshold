@@ -1,32 +1,35 @@
 import { chromium } from 'playwright'
 import { preview } from 'vite'
-
-const server = await preview({ preview: { port: 4202, strictPort: true } })
+const server = await preview({ preview: { port: 4206, strictPort: true } })
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-page.on('pageerror', (e) => console.log('pageerror:', e.message))
-await page.goto('http://localhost:4202/?qa=1&quality=high', { waitUntil: 'load' })
+const errs = []
+page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()) })
+page.on('pageerror', (e) => errs.push('PE:' + e.message))
+await page.goto('http://localhost:4206/?qa=1&quality=high&seed=demo', { waitUntil: 'load' })
 await page.waitForFunction(() => window.__BREACH__?.ready === true, { timeout: 25000 })
 const B = (fn, ...a) => page.evaluate(({ fn, a }) => window.__BREACH__[fn](...a), { fn, a })
-
 await B('invuln', true)
 await B('giveWeapon')
-await page.waitForTimeout(700)
+await page.waitForTimeout(800)
 await page.screenshot({ path: 'scripts/peek-entrance.png' })
+console.log('pulseEnergy before:', await B('pulseEnergy'))
+await B('pulse')
+await page.waitForTimeout(70)
+await page.screenshot({ path: 'scripts/peek-pulse.png' })
+console.log('pulseEnergy after pulse:', (await B('pulseEnergy')).toFixed(2), '(expect ~0)')
+console.log('anchorsRemaining:', await B('anchorsRemaining'))
 
-// weapon + portal look
-await page.evaluate(() => window.__BREACH__.look(1.5, 0))
-await page.waitForTimeout(300)
-await B('shoot'); await page.waitForTimeout(30)
-await page.screenshot({ path: 'scripts/peek-weapon.png' })
+await B('enterZone', 2); await page.waitForTimeout(1100)
+await B('spawnEnemy', 'warden'); await page.waitForTimeout(700)
+await page.screenshot({ path: 'scripts/peek-scale.png' })
 
-for (const [name, z] of [['loop', 1], ['scale', 2], ['mirror', 3]]) {
-  await B('enterZone', z)
-  await page.waitForTimeout(1100)
-  await B('spawnEnemy', 'echo'); await B('spawnEnemy', 'shard')
-  await page.waitForTimeout(700)
-  await B('shoot'); await page.waitForTimeout(30)
-  await page.screenshot({ path: `scripts/peek-${name}.png` })
-  console.log('shot', name)
-}
+await B('enterZone', 3); await page.waitForTimeout(1100)
+await B('pulse'); await page.waitForTimeout(70)
+await page.screenshot({ path: 'scripts/peek-mirror.png' })
+
+await B('forceVictory'); await page.waitForTimeout(1200)
+await page.screenshot({ path: 'scripts/peek-victory.png' })
+console.log('phase:', (await B('state')).phase)
+console.log('errors:', errs.length ? errs.slice(0, 8) : 'none')
 await browser.close(); await server.close(); process.exit(0)

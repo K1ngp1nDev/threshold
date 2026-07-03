@@ -25,6 +25,7 @@ const params = new URLSearchParams(location.search)
 const qaMode = params.get('qa') === '1'
 const forceTouch = params.get('touch') === '1'
 const forceReduce = params.get('reduce') === '1'
+const seedParam = params.get('seed') ?? ''
 
 const isTouch =
   forceTouch ||
@@ -95,8 +96,7 @@ const hud = createHud({
   onJump: () => player.jump(),
   onCrouch: (on) => player.setCrouch(on),
   onFire: (down) => director.weapon.setPrimary(down),
-  onPulseDown: () => director.weapon.beginCharge(),
-  onPulseUp: () => director.weapon.releaseCharge(),
+  onPulse: () => director.triggerPulse(),
 })
 
 director = new Director(scene, player, {
@@ -111,18 +111,18 @@ director = new Director(scene, player, {
   toast: (t, ms) => hud.toast(t, ms),
   banner: (title, sub) => hud.banner(title, sub),
   hitMarker: (kind) => hud.hitMarker(kind),
-})
+  pulseFlash: () => hud.pulseFlash(),
+}, seedParam)
 
-// desktop mouse fire
+// desktop mouse: LMB fire, RMB Anomaly Pulse
 window.addEventListener('mousedown', (e) => {
   if (isTouch || getState().phase !== 'playing') return
   if (e.button === 0) director.weapon.setPrimary(true)
-  else if (e.button === 2) director.weapon.beginCharge()
+  else if (e.button === 2) director.triggerPulse()
 })
 window.addEventListener('mouseup', (e) => {
   if (isTouch) return
   if (e.button === 0) director.weapon.setPrimary(false)
-  else if (e.button === 2) director.weapon.releaseCharge()
 })
 canvas.addEventListener('pointerdown', () => {
   unlockAudio()
@@ -182,8 +182,9 @@ const api = {
     const d = () => director.debug()
     return {
       shoot: () => d().shoot(),
-      chargedShoot: () => d().chargedShoot(),
+      pulse: () => d().pulse(),
       giveWeapon: () => d().giveWeapon(),
+      forceVictory: () => d().forceVictory(),
       enterZone: (i: number) => d().enterZone(i),
       zoneCount: () => d().zoneCount,
       enemyCount: () => d().enemyCount(),
@@ -191,6 +192,7 @@ const api = {
       killAll: () => d().killAll(),
       sealNearestAnchor: () => d().sealNearestAnchor(),
       anchorsRemaining: () => d().anchorsRemaining(),
+      pulseEnergy: () => d().pulseEnergy(),
     }
   })(),
 }

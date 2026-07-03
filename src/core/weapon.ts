@@ -10,7 +10,7 @@ import {
 } from '@babylonjs/core'
 import { ANOMALY, addTrauma, FX, WARM } from './fx'
 import { getState, setState } from '../state'
-import { playClick, playWhoosh } from './audio'
+import { playClick } from './audio'
 
 export type HitKind = 'enemy' | 'anchor' | 'sealed' | 'shielded' | 'wall' | 'miss'
 export interface ResolveResult {
@@ -19,24 +19,23 @@ export interface ResolveResult {
   killed?: boolean
 }
 export interface CombatContext {
-  resolveHit(origin: Vector3, dir: Vector3, maxDist: number, charged: boolean): ResolveResult
+  resolveHit(origin: Vector3, dir: Vector3, maxDist: number): ResolveResult
   onHitMarker(kind: 'hit' | 'kill' | 'shielded'): void
 }
 
 const PRIMARY_HEAT = 9
-const CHARGED_HEAT = 34
 const PRIMARY_CD = 0.11
-const CHARGE_TIME = 0.7
 const COOL_RATE = 26
 const OVERHEAT_RESET = 35
 const RANGE = 90
 
+// The Prism Carbine — LMB only. Fast energy shot: hitscan, tracer, muzzle
+// flash, hit marker, recoil, heat instead of ammo. (RMB is the Anomaly Pulse,
+// owned by the director.)
 export class Weapon {
   private root: TransformNode
   private prism: Mesh
   private prismMat: StandardMaterial
-  private ctx: CombatContext
-  private fx: FX
   private cooldown = 0
   private recoil = 0
   private appliedRecoil = 0
@@ -45,9 +44,7 @@ export class Weapon {
   private firingPrimary = false
   private basePos = new Vector3(0.26, -0.26, 0.62)
 
-  constructor(scene: Scene, private cam: UniversalCamera, ctx: CombatContext, fx: FX) {
-    this.ctx = ctx
-    this.fx = fx
+  constructor(scene: Scene, private cam: UniversalCamera, private ctx: CombatContext, private fx: FX) {
     this.root = new TransformNode('carbine', scene)
     this.root.parent = cam
     this.root.position.copyFrom(this.basePos)
@@ -116,26 +113,12 @@ export class Weapon {
     this.firingPrimary = down
   }
 
-  beginCharge(): void {
-    if (!this.canFire()) return
-    setState({ charging: true })
-  }
-
-  releaseCharge(): void {
-    const st = getState()
-    if (!st.charging) return
-    const charge = st.charge
-    setState({ charging: false, charge: 0 })
-    if (charge < 0.35 || !this.canFire()) return
-    this.fireCharged(charge)
-  }
-
   private firePrimary(): void {
     if (!this.canFire() || this.cooldown > 0) return
     this.cooldown = PRIMARY_CD
     const dir = this.forward()
     const origin = this.cam.position.clone()
-    const res = this.ctx.resolveHit(origin, dir, RANGE, false)
+    const res = this.ctx.resolveHit(origin, dir, RANGE)
     this.fx.tracer(this.muzzle(), res.point, WARM)
     this.fx.flash(this.muzzle(), WARM, 1.6, 60)
     this.recoil += 0.012
@@ -143,21 +126,6 @@ export class Weapon {
     addTrauma(0.08)
     playClick()
     this.addHeat(PRIMARY_HEAT)
-    this.markHit(res)
-  }
-
-  private fireCharged(charge: number): void {
-    const dir = this.forward()
-    const origin = this.cam.position.clone()
-    const res = this.ctx.resolveHit(origin, dir, RANGE, true)
-    this.fx.tracer(this.muzzle(), res.point, ANOMALY, true)
-    this.fx.flash(this.muzzle(), ANOMALY, 2.6, 120)
-    this.fx.sparks(res.point, 'anomaly', 24)
-    this.recoil += 0.04 * charge
-    this.kickZ = -0.16
-    addTrauma(0.28)
-    playWhoosh()
-    this.addHeat(CHARGED_HEAT)
     this.markHit(res)
   }
 
@@ -186,26 +154,15 @@ export class Weapon {
     const st = getState()
     if (this.cooldown > 0) this.cooldown -= dt
 
-    // charging
-    if (st.charging) {
-      const charge = Math.min(1, st.charge + dt / CHARGE_TIME)
-      setState({ charge })
-    }
-
-    // heat cooldown + overheat clear
-    if (!st.charging) {
-      const heat = Math.max(0, st.heat - COOL_RATE * dt)
-      const overheated = st.overheated && heat > OVERHEAT_RESET
-      setState({ heat, overheated })
-    }
+    const heat = Math.max(0, st.heat - COOL_RATE * dt)
+    const overheated = st.overheated && heat > OVERHEAT_RESET
+    setState({ heat, overheated })
 
     if (this.firingPrimary) this.firePrimary()
 
-    // prism visual: charge glow / overheat red
+    // prism visual: overheat red, else anomaly with a small heat glow
     const glow = st.overheated ? new Color3(1, 0.25, 0.2) : ANOMALY
-    const chargeBoost = 1 + st.charge * 3 + (st.overheated ? 1.5 : 0)
-    this.prismMat.emissiveColor = glow.scale(0.9 * chargeBoost)
-    this.prism.scaling.setAll(1 + st.charge * 1.6)
+    this.prismMat.emissiveColor = glow.scale(0.8 + (st.heat / 100) * 0.8)
 
     // recoil (self-correcting like screen shake)
     this.cam.rotation.x -= this.appliedRecoil
@@ -216,12 +173,7 @@ export class Weapon {
     // viewmodel bob + kick
     this.kickZ += (0 - this.kickZ) * Math.min(1, dt * 10)
     this.bobT += dt
-    const reduced = st.reducedMotion
-    const bobAmt = reduced ? 0 : 0.006
-    this.root.position.set(
-      this.basePos.x,
-      this.basePos.y + Math.sin(this.bobT * 6) * bobAmt,
-      this.basePos.z + this.kickZ,
-    )
+    const bobAmt = st.reducedMotion ? 0 : 0.006
+    this.root.position.set(this.basePos.x, this.basePos.y + Math.sin(this.bobT * 6) * bobAmt, this.basePos.z + this.kickZ)
   }
 }

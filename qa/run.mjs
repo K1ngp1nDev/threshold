@@ -112,7 +112,20 @@ try {
   check('shooting works & enemy can be killed', killsAfter > killsBefore, `kills ${killsBefore}→${killsAfter}, spawned ${before}`)
 } catch (e) { check('shooting works & enemy can be killed', false, String(e).slice(0, 120)) }
 
-// anchor can be destroyed
+// anomaly pulse works (RMB signature ability)
+try {
+  await B('enterZone', 0)
+  await page.waitForTimeout(900)
+  await B('giveWeapon')
+  await page.waitForTimeout(200)
+  const p0 = await B('pulseEnergy')
+  await B('pulse')
+  await page.waitForTimeout(150)
+  const p1 = await B('pulseEnergy')
+  check('anomaly pulse works', p0 > 0.9 && p1 < 0.3, `energy ${p0.toFixed(2)}→${p1.toFixed(2)}`)
+} catch (e) { check('anomaly pulse works', false, String(e).slice(0, 120)) }
+
+// anchor can be sealed (pulse exposes, fire seals)
 try {
   const before = await B('anchorsRemaining')
   const sealedBefore = (await B('state')).anchorsSealed
@@ -120,8 +133,8 @@ try {
   await page.waitForTimeout(400)
   const after = await B('anchorsRemaining')
   const sealedAfter = (await B('state')).anchorsSealed
-  check('anchor can be destroyed', after < before && sealedAfter > sealedBefore, `remaining ${before}→${after}`)
-} catch (e) { check('anchor can be destroyed', false, String(e).slice(0, 120)) }
+  check('anchor can be sealed', after < before && sealedAfter > sealedBefore, `remaining ${before}→${after}`)
+} catch (e) { check('anchor can be sealed', false, String(e).slice(0, 120)) }
 
 // zones reachable
 try {
@@ -133,6 +146,14 @@ try {
   const z2 = (await B('state')).zoneLabel
   check('≥2 zones reachable', z1 === 'Loop Corridor' && z2 === 'Scale Gallery', `${z1} · ${z2}`)
 } catch (e) { check('≥2 zones reachable', false, String(e).slice(0, 120)) }
+
+// forced result screen reachable
+try {
+  await B('forceVictory')
+  await page.waitForTimeout(1200)
+  const phase = (await B('state')).phase
+  check('result screen reachable (victory)', phase === 'victory', `phase=${phase}`)
+} catch (e) { check('result screen reachable (victory)', false, String(e).slice(0, 120)) }
 
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | ').slice(0, 200) || 'clean')
 await ctx.close()
@@ -156,13 +177,13 @@ for (const width of [360, 390, 768, 1440]) {
 
 // ---- screenshots
 const DIR = 'docs/screenshots'
-const expected = ['threshold-breach-start.png', 'combat-entrance.png', 'loop-corridor-fight.png', 'scale-gallery-arena.png', 'mirror-atrium-final.png', 'weapon-and-portal.png', 'mobile.png']
+const expected = ['threshold-breach-start.png', 'combat-entrance.png', 'anomaly-pulse.png', 'loop-corridor-fight.png', 'scale-gallery-arena.png', 'mirror-atrium-final.png', 'victory-screen.png', 'mobile.png']
 if (!existsSync(DIR) || readdirSync(DIR).length === 0) {
   check('screenshots present (run `npm run shots`)', false, 'docs/screenshots is empty')
 } else {
   const files = readdirSync(DIR).filter((f) => f.endsWith('.png'))
   const missing = expected.filter((f) => !files.includes(f))
-  check('screenshots present (all 7)', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${files.length} files`)
+  check('screenshots present (all 8)', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${files.length} files`)
   let ok = true
   const bad = []
   for (const f of files) {

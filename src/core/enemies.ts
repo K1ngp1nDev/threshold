@@ -8,7 +8,7 @@ import {
   TransformNode,
   Vector3,
 } from '@babylonjs/core'
-import { ANOMALY, FX } from './fx'
+import { ANOMALY, FX, WARM } from './fx'
 import { getState } from '../state'
 
 export type EnemyType = 'echo' | 'shard' | 'warden'
@@ -39,7 +39,6 @@ class Enemy {
   root: TransformNode
   type: EnemyType
   hp: number
-  maxHp: number
   radius: number
   state: 'spawning' | 'active' | 'dead' = 'spawning'
   private spawnT = 0
@@ -50,12 +49,15 @@ class Enemy {
   private teleT = 4
   private bob: number
   private core: Mesh
+  private shellMats: { mat: StandardMaterial; base: Color3 }[] = []
+  private flashT = 0
+  private knockVel = new Vector3(0, 0, 0)
+  private staggerT = 0
 
   constructor(private ctx: EnemyContext, type: EnemyType, pos: Vector3, private bounds: Bounds) {
     this.type = type
     const s = STATS[type]
     this.hp = s.hp
-    this.maxHp = s.hp
     this.radius = s.radius
     this.bob = Math.random() * Math.PI * 2
     this.root = new TransformNode(`enemy-${type}-${Math.floor(Math.random() * 1e6)}`, ctx.scene)
@@ -65,18 +67,16 @@ class Enemy {
     ctx.fx.sparks(this.root.position, 'anomaly', 18)
   }
 
-  private mat(name: string, diffuse: Color3, emissive?: Color3): StandardMaterial {
+  private shell(name: string, diffuse: Color3, emissive: Color3): StandardMaterial {
     const m = new StandardMaterial(name, this.ctx.scene)
     m.diffuseColor = diffuse
     m.specularColor = new Color3(0.15, 0.15, 0.15)
-    if (emissive) {
-      m.emissiveColor = emissive
-    }
+    m.emissiveColor = emissive.clone()
+    this.shellMats.push({ mat: m, base: emissive.clone() })
     return m
   }
 
   private build(type: EnemyType): Mesh {
-    const dark = this.mat(`e-shell-${type}`, new Color3(0.08, 0.08, 0.09))
     const coreMat = new StandardMaterial(`e-core-${type}`, this.ctx.scene)
     coreMat.emissiveColor = ANOMALY.clone()
     coreMat.diffuseColor = Color3.Black()
@@ -85,7 +85,7 @@ class Enemy {
     let core: Mesh
     if (type === 'echo') {
       const shell = MeshBuilder.CreatePolyhedron('echo-shell', { type: 2, size: 0.5 }, this.ctx.scene)
-      shell.material = dark
+      shell.material = this.shell('echo-shell-mat', new Color3(0.08, 0.08, 0.09), new Color3(0.02, 0.02, 0.03))
       shell.parent = this.root
       shell.isPickable = false
       core = MeshBuilder.CreateSphere('echo-core', { diameter: 0.34, segments: 10 }, this.ctx.scene)
@@ -98,16 +98,17 @@ class Enemy {
       core.parent = this.root
       core.isPickable = false
       const ring = MeshBuilder.CreateTorus('shard-ring', { diameter: 1.1, thickness: 0.05, tessellation: 24 }, this.ctx.scene)
-      ring.material = dark
+      ring.material = this.shell('shard-ring-mat', new Color3(0.1, 0.1, 0.11), new Color3(0.02, 0.03, 0.04))
       ring.rotation.x = Math.PI / 2
       ring.parent = this.root
       ring.isPickable = false
     } else {
       const body = MeshBuilder.CreateCylinder('warden-body', { height: 2.2, diameterTop: 0.5, diameterBottom: 1.2, tessellation: 6 }, this.ctx.scene)
-      body.material = this.mat('warden-shell', new Color3(0.12, 0.11, 0.1), ANOMALY.scale(0.04))
+      body.material = this.shell('warden-body-mat', new Color3(0.12, 0.11, 0.1), ANOMALY.scale(0.05))
       body.parent = this.root
       body.isPickable = false
-      const brass = this.mat('warden-brass', new Color3(0.5, 0.4, 0.22))
+      const brass = new StandardMaterial('warden-brass', this.ctx.scene)
+      brass.diffuseColor = new Color3(0.5, 0.4, 0.22)
       for (let i = 0; i < 3; i++) {
         const band = MeshBuilder.CreateTorus(`warden-band-${i}`, { diameter: 1.1 - i * 0.25, thickness: 0.06, tessellation: 6 }, this.ctx.scene)
         band.material = brass
@@ -132,6 +133,7 @@ class Enemy {
   takeDamage(dmg: number): boolean {
     if (this.state === 'dead') return false
     this.hp -= dmg
+    this.flashT = 0.12
     this.ctx.fx.sparks(this.root.position, 'anomaly', 8)
     if (this.hp <= 0) {
       this.die()
@@ -140,11 +142,19 @@ class Enemy {
     return false
   }
 
+  knockback(fromPos: Vector3, force: number): void {
+    const d = this.root.position.subtract(fromPos)
+    d.y = 0
+    if (d.lengthSquared() < 0.001) d.set(Math.random() - 0.5, 0, Math.random() - 0.5)
+    d.normalize()
+    this.knockVel.addInPlace(d.scale(force))
+    this.staggerT = Math.max(this.staggerT, 1.1)
+  }
+
   die(): void {
     if (this.state === 'dead') return
     this.state = 'dead'
     this.ctx.fx.dissolve(this.core, ANOMALY)
-    // dissolve the shell too
     for (const c of this.root.getChildMeshes()) {
       if (c !== this.core) this.ctx.fx.dissolve(c as Mesh, ANOMALY)
     }
@@ -169,6 +179,18 @@ class Enemy {
   }
 
   update(dt: number, spawnProjectile: (pos: Vector3, vel: Vector3) => void): void {
+    // hit flash
+    if (this.flashT > 0) {
+      this.flashT = Math.max(0, this.flashT - dt)
+      const k = this.flashT / 0.12
+      for (const s of this.shellMats) s.mat.emissiveColor = Color3.Lerp(s.base, WARM, k)
+    }
+    // knockback drift
+    if (this.knockVel.lengthSquared() > 0.0001) {
+      this.root.position.addInPlace(this.knockVel.scale(dt))
+      this.knockVel.scaleInPlace(1 - Math.min(1, dt * 4))
+    }
+
     const s = STATS[this.type]
     const player = this.ctx.playerPos()
     this.bob += dt
@@ -186,25 +208,28 @@ class Enemy {
     const dist = toPlayer.length()
     const flat = new Vector3(toPlayer.x, 0, toPlayer.z)
     if (flat.lengthSquared() > 0.0001) flat.normalize()
-
-    // face player (yaw)
     this.root.rotation.y = Math.atan2(toPlayer.x, toPlayer.z)
 
     const reduced = getState().reducedMotion
     this.root.position.y = s.y + (reduced ? 0 : Math.sin(this.bob * 2) * 0.12)
     this.core.rotation.y += dt * 1.5
 
+    // staggered by pulse — hold position, no attack
+    if (this.staggerT > 0) {
+      this.staggerT = Math.max(0, this.staggerT - dt)
+      this.clamp()
+      return
+    }
+
     if (this.type === 'echo') {
       this.root.position.addInPlace(flat.scale(s.speed * dt))
       if (dist < s.meleeRange) this.tryMelee(dt, s.melee, s.meleeCd)
     } else if (this.type === 'shard') {
-      // keep mid distance, strafe
       const desired = 10
       if (dist < desired - 1.5) this.root.position.subtractInPlace(flat.scale(s.speed * dt))
       else if (dist > desired + 1.5) this.root.position.addInPlace(flat.scale(s.speed * dt))
       const strafe = new Vector3(flat.z, 0, -flat.x).scale(Math.sin(this.bob * 0.7) * s.speed * dt)
       this.root.position.addInPlace(strafe)
-      // fire
       this.losT -= dt
       if (this.losT <= 0) {
         this.losT = 0.3
@@ -218,7 +243,6 @@ class Enemy {
         spawnProjectile(this.root.position.clone(), aim.scale(9))
       }
     } else {
-      // warden: slow advance + periodic blink toward player
       this.teleT -= dt
       if (this.teleT <= 0 && dist > 6) {
         this.teleT = 5 + Math.random() * 3
@@ -232,7 +256,6 @@ class Enemy {
       }
       if (dist < s.meleeRange) this.tryMelee(dt, s.melee, s.meleeCd)
     }
-
     this.clamp()
   }
 
@@ -255,6 +278,7 @@ export class EnemyManager {
   private enemies: Enemy[] = []
   private projectiles: Projectile[] = []
   private projMat: StandardMaterial
+  private projSlowT = 0
   bounds: Bounds = { min: new Vector3(-100, 0, -100), max: new Vector3(100, 5, 100) }
 
   constructor(private ctx: EnemyContext) {
@@ -278,7 +302,21 @@ export class EnemyManager {
     return this.enemies.filter((e) => e.state !== 'dead').length
   }
 
-  /** Nearest enemy hit by a ray, within maxDist. Returns hit info for damage. */
+  /** Is a living Warden within r of pos? (used to keep an anchor's shield up) */
+  wardenNear(pos: Vector3, r: number): boolean {
+    return this.enemies.some((e) => e.state === 'active' && e.type === 'warden' && Vector3.Distance(e.position, pos) < r)
+  }
+
+  /** Anomaly Pulse effect: knock back + stagger enemies in radius, slow projectiles. */
+  pulse(center: Vector3, radius: number): void {
+    for (const e of this.enemies) {
+      if (e.state === 'dead') continue
+      const d = Vector3.Distance(e.position, center)
+      if (d < radius) e.knockback(center, 6 * (1 - d / radius) + 1.5)
+    }
+    this.projSlowT = 2.5
+  }
+
   raycast(origin: Vector3, dir: Vector3, maxDist: number): { enemy: Enemy; point: Vector3; dist: number } | null {
     let best: { enemy: Enemy; point: Vector3; dist: number } | null = null
     for (const e of this.enemies) {
@@ -290,9 +328,7 @@ export class EnemyManager {
       if (disc < 0) continue
       const t = (-b - Math.sqrt(disc)) / 2
       if (t < 0 || t > maxDist) continue
-      if (!best || t < best.dist) {
-        best = { enemy: e, point: origin.add(dir.scale(t)), dist: t }
-      }
+      if (!best || t < best.dist) best = { enemy: e, point: origin.add(dir.scale(t)), dist: t }
     }
     return best
   }
@@ -318,20 +354,15 @@ export class EnemyManager {
     }
 
     for (const e of this.enemies) e.update(dt, (p, v) => this.spawnProjectile(p, v))
-    this.enemies = this.enemies.filter((e) => {
-      if (e.state === 'dead') {
-        // keep until disposed by timeout; drop from list quickly
-        return false
-      }
-      return true
-    })
+    this.enemies = this.enemies.filter((e) => e.state !== 'dead')
 
-    // projectiles
+    if (this.projSlowT > 0) this.projSlowT = Math.max(0, this.projSlowT - dt)
+    const slow = this.projSlowT > 0 ? 0.35 : 1
     const player = this.ctx.playerPos()
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i]
       p.life -= dt
-      p.mesh.position.addInPlace(p.vel.scale(dt))
+      p.mesh.position.addInPlace(p.vel.scale(dt * slow))
       if (Vector3.Distance(p.mesh.position, player) < 0.7) {
         this.ctx.damagePlayer(12)
         this.ctx.fx.sparks(p.mesh.position, 'warm', 12)
