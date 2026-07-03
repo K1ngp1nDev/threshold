@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#141210" />
+    <meta
+      name="description"
+      content="THRESHOLD — a walkable museum of impossible spaces. Non-Euclidean portals, a corridor that loops, a room bigger than the building. Procedural, no assets, Babylon.js."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23141210'/%3E%3Crect x='9' y='6' width='14' height='22' rx='1.5' fill='none' stroke='%23c9a35c' stroke-width='2'/%3E%3Crect x='13' y='12' width='6' height='16' fill='%23c9a35c'/%3E%3C/svg%3E"
+    />
+    <title>THRESHOLD — Museum of Impossible Spaces</title>
+    <style>
+      :root {
+        --ink: #171412;
+        --paper: #f4efe7;
+        --brass: #c9a35c;
+        --teal: #5aa39a;
+        --panel: rgba(20, 18, 16, 0.78);
+        --panel-line: rgba(201, 163, 92, 0.35);
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; background: #141210; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        color: var(--paper);
+        -webkit-font-smoothing: antialiased;
+      }
+      #c {
+        position: fixed; inset: 0; width: 100%; height: 100%;
+        display: block; outline: none; touch-action: none;
+      }
+      #veil {
+        position: fixed; inset: 0; z-index: 40;
+        background: #141210;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        transition: opacity 600ms ease;
+      }
+      #veil.gone { opacity: 0; pointer-events: none; }
+      #veil .mark {
+        width: 44px; height: 66px; border: 2px solid var(--brass); border-radius: 3px;
+        position: relative; opacity: 0.9;
+      }
+      #veil .mark::after {
+        content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; top: 26px;
+        background: var(--brass); opacity: 0.85;
+      }
+      #veil .word { letter-spacing: 0.42em; font-size: 13px; color: var(--brass); text-transform: uppercase; }
+      #veil .sub { font-size: 12px; color: rgba(244, 239, 231, 0.55); }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" tabindex="0" aria-label="THRESHOLD 3D museum"></canvas>
+    <div id="veil" aria-hidden="true">
+      <div class="mark"></div>
+      <div class="word">Threshold</div>
+      <div class="sub">preparing the institute…</div>
+    </div>
+    <div id="ui"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

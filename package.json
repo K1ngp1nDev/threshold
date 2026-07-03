@@ -1,0 +1,23 @@
+{
+  "name": "threshold",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "THRESHOLD — a walkable museum of impossible spaces (non-Euclidean portals, procedural, Babylon.js)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "qa": "node qa/run.mjs",
+    "shots": "node scripts/shots.mjs"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^8.6.0"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0",
+    "playwright": "^1.52.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.3.5"
+  }
+}
