@@ -26,12 +26,13 @@ export interface EnemyContext {
   wallMeshes: () => Mesh[]
 }
 
+// All speeds are below the player's walk (4.0) so you can always kite them.
 const STATS: Record<EnemyType, {
   hp: number; speed: number; radius: number; y: number; melee: number; meleeRange: number; meleeCd: number
 }> = {
-  echo: { hp: 30, speed: 3.6, radius: 0.55, y: 1.15, melee: 8, meleeRange: 1.9, meleeCd: 0.85 },
-  shard: { hp: 42, speed: 2.4, radius: 0.6, y: 1.35, melee: 0, meleeRange: 0, meleeCd: 0 },
-  warden: { hp: 150, speed: 1.7, radius: 1.0, y: 1.5, melee: 24, meleeRange: 2.6, meleeCd: 1.6 },
+  echo: { hp: 30, speed: 3.0, radius: 0.55, y: 1.15, melee: 8, meleeRange: 1.9, meleeCd: 0.85 },
+  shard: { hp: 42, speed: 2.0, radius: 0.6, y: 1.35, melee: 0, meleeRange: 0, meleeCd: 0 },
+  warden: { hp: 150, speed: 1.4, radius: 1.0, y: 1.5, melee: 24, meleeRange: 2.6, meleeCd: 1.6 },
 }
 
 class Enemy {

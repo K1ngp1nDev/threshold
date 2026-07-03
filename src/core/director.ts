@@ -203,12 +203,17 @@ export class Director implements CombatContext {
 
     if (z.throughPortal) this.spawnHallEnemies()
 
-    this.hud.banner(`WING ${i + 1} / ${this.zones.length}`, z.label)
-    this.hud.toast(z.briefing, 5000)
+    if (i === 0 && !getState().hasWeapon) {
+      this.hud.banner('RECOVER THE PRISM CARBINE', 'It’s on the plinth ahead — press E')
+      this.hud.toast('Walk up to the glowing plinth ahead and press E to arm the Prism Carbine.', 6000)
+    } else {
+      this.hud.banner(`WING ${i + 1} / ${this.zones.length}`, z.label)
+      this.hud.toast(z.briefing, 5000)
+    }
   }
 
   private spawnWeaponPickup(): void {
-    const pos = new Vector3(-6, 1.15, 0.8)
+    const pos = new Vector3(-7, 1.15, 1.4)
     const node = new TransformNode('weapon-pickup-node', this.scene)
     node.position.copyFrom(pos)
     const ped = MeshBuilder.CreateCylinder('wp-ped', { height: 1.0, diameter: 0.5, tessellation: 8 }, this.scene)
@@ -232,7 +237,7 @@ export class Director implements CombatContext {
     this.world.addInteractable({
       id: 'weapon',
       position: pos,
-      radius: 3,
+      radius: 5,
       prompt: 'E — take the Prism Carbine',
       enabled: () => !getState().hasWeapon,
       onInteract: () => {

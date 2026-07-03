@@ -100,9 +100,16 @@ export function createHud(deps: HudDeps): Hud {
   const heatFill = heatWrap.querySelector('.heat-fill') as HTMLElement
   const heatLabel = heatWrap.querySelector('.heat-label') as HTMLElement
 
-  // interaction hint
+  // interaction hint (tappable on touch so you can pick up / use)
   const hint = el('div', 'hud-panel hud-hint')
   hud.appendChild(hint)
+  if (deps.isTouch) {
+    hint.style.pointerEvents = 'auto'
+    hint.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      deps.onInteract()
+    })
+  }
 
   // banner
   const banner = el('div', 'banner')
@@ -307,7 +314,9 @@ export function createHud(deps: HudDeps): Hud {
     },
     setPrompt: (text) => {
       if (text) {
-        hint.innerHTML = text.replace(/^E — /, '<b>E</b> — ')
+        hint.innerHTML = deps.isTouch
+          ? text.replace(/^E — /, '<b>TAP</b> — ')
+          : text.replace(/^E — /, '<b>E</b> — ')
         hint.classList.add('show')
       } else {
         hint.classList.remove('show')
